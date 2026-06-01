@@ -43,7 +43,15 @@ function acquire_ffmpeg_slot(): Promise<() => void> {
  */
 function resolve_ffmpeg_bin(): string {
     const configured = (config.ffmpeg?.path || "").trim();
-    if (!configured) return "ffmpeg";
+    if (!configured) {
+        // Try ffmpeg-static (bundled binary — works on Render/Docker without system ffmpeg).
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const staticPath = require("ffmpeg-static") as string | null;
+            if (staticPath && fs.existsSync(staticPath)) return staticPath;
+        } catch { /* package not installed, fall through */ }
+        return "ffmpeg";
+    }
 
     // Trim trailing slashes for consistency.
     const normalized = configured.replace(/[\\/]+$/, "");
