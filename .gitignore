@@ -1,0 +1,11 @@
+node_modules/
+dist/
+logs/
+exports/
+.env
+*.local
+*.log
+
+# uploaded files & generated storage
+public/profile_pics/
+storage/

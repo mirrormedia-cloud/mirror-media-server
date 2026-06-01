@@ -1,0 +1,6 @@
+// TODO: Add modules here
+// Each module should have its own folder with: routes.ts, service.ts, schema.ts
+// Example:
+// src/modules/auth/routes.ts
+// src/modules/auth/service.ts
+// src/modules/auth/schema.ts
