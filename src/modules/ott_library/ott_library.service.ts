@@ -425,7 +425,7 @@ export async function save_bulk_video_assets_to_library(req: FastifyRequest) {
         succeeded: items.length,
         failed: failures.length,
         failures,
-        items: items.map(library_item_dto),
+        items: items.map(item => library_item_dto(item)),
     });
 }
 
@@ -573,7 +573,7 @@ export async function save_from_cards(req: FastifyRequest) {
         failed: failures.length,
         no_url,
         failures,
-        items: items.map(library_item_dto),
+        items: items.map(item => library_item_dto(item)),
     });
 }
 

@@ -910,7 +910,7 @@ async function _disabled_legacy_upload_files(req: FastifyRequest) {
             count: created.length,
             failed: failures.length,
             failures,
-            items: created.map(library_item_dto),
+            items: created.map(item => library_item_dto(item)),
         },
         status_code,
     );

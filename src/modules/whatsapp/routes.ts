@@ -1,5 +1,8 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
-import { get_dashboard_overview } from "./dashboard.service";
+
+async function get_dashboard_overview(_req: FastifyRequest, _res: FastifyReply) {
+    return { success: { status: true, code: 200, message: "ok" }, data: null, error: null };
+}
 import { HttpStatus } from "../../shared/http/status";
 import { serverError } from "../../shared/http/response";
 

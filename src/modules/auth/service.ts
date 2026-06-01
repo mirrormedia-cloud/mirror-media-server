@@ -106,11 +106,11 @@ async function checkOtpSendLimit(email: string): Promise<{ allowed: boolean; ret
     const cooldown = record.cooldown_minutes ?? OtpRateLimit.DEFAULT_COOLDOWN;
 
     const blockCheck = isBlocked(record);
-    if (blockCheck.blocked) return { allowed: false, retry_after: blockCheck.retry_after };
+    if (blockCheck.blocked) return { allowed: false, ...(blockCheck.retry_after !== undefined ? { retry_after: blockCheck.retry_after } : {}) };
 
     // Cooldown passed or counts manually reset — reset everything
     if (record.blocked_until) {
-        await OtpRateLimit.update({ send_count: 1, verify_count: 0, window_start: new Date(), blocked_until: null }, { where: { email } });
+        await OtpRateLimit.update({ send_count: 1, verify_count: 0, window_start: new Date(), blocked_until: null as any }, { where: { email } });
         return { allowed: true };
     }
 
@@ -133,11 +133,11 @@ async function checkOtpVerifyLimit(email: string): Promise<{ allowed: boolean; r
     const cooldown = record.cooldown_minutes ?? OtpRateLimit.DEFAULT_COOLDOWN;
 
     const blockCheck = isBlocked(record);
-    if (blockCheck.blocked) return { allowed: false, retry_after: blockCheck.retry_after };
+    if (blockCheck.blocked) return { allowed: false, ...(blockCheck.retry_after !== undefined ? { retry_after: blockCheck.retry_after } : {}) };
 
     // Cooldown passed — reset
     if (record.blocked_until) {
-        await OtpRateLimit.update({ send_count: 0, verify_count: 1, window_start: new Date(), blocked_until: null }, { where: { email } });
+        await OtpRateLimit.update({ send_count: 0, verify_count: 1, window_start: new Date(), blocked_until: null as any }, { where: { email } });
         return { allowed: true, remaining: maxVerify - 1 };
     }
 
