@@ -9,7 +9,7 @@ exports/
 
 # uploaded files & generated storage
 public/profile_pics/
-storage/
+/storage/
 
 # service-account credentials — never commit
 firebase-service-account.json
