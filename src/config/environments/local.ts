@@ -17,7 +17,7 @@ const localConfig = {
     user: process.env.DATABASE_USER ?? "postgres",
     password: process.env.DATABASE_PASSWORD ?? "postgres",
     name: process.env.DATABASE_NAME ?? "",
-    ssl: false,
+    ssl: process.env.DATABASE_SSL === "true",
   },
 
   logging: {
