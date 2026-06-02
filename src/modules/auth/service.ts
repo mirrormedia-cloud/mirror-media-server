@@ -176,7 +176,7 @@ async function resetOtpLimits(email: string) {
 
 export async function ssoVerify(req: FastifyRequest) {
     try {
-        const { email, username, first_name, last_name, profile_picture, platform = "web", app_type } = req.body as any;
+        const { email, username, first_name, last_name, profile_picture, platform = "app", app_type } = req.body as any;
 
         const existingUser = await User.findOne({ where: { email }, raw: true });
         if (existingUser) {
@@ -221,7 +221,7 @@ export async function ssoVerify(req: FastifyRequest) {
 
 export async function ssoRegister(req: FastifyRequest) {
     try {
-        const { verification_id, first_name, last_name, profile_picture, platform = "web", app_type } = req.body as any;
+        const { verification_id, first_name, last_name, profile_picture, platform = "app", app_type } = req.body as any;
         console.log("[ssoRegister] verification_id:", verification_id);
         const pendingSso = await SsoVerificationDetail.findOne({ where: { verification_id }, raw: true });
         console.log("[ssoRegister] pendingSso:", pendingSso);
@@ -429,7 +429,7 @@ export async function resendOtp(req: FastifyRequest) {
 
 export async function verifyOtp(req: FastifyRequest) {
     try {
-        const { verification_id, otp, platform = "web", app_type } = req.body as any;
+        const { verification_id, otp, platform = "app", app_type } = req.body as any;
 
         // Check if this verification_id is rate limited (by email from OTP or rate limit table)
         const otpRecord = await AuthenticationOtp.findOne({ where: { verification_id }, raw: true });
@@ -696,7 +696,7 @@ export async function resetPassword(req: FastifyRequest) {
 
 export async function login(req: FastifyRequest) {
     try {
-        const { email, password, platform = "web", app_type } = req.body as any;
+        const { email, password, platform = "app", app_type } = req.body as any;
         const user = await User.findOne({ where: { email }, raw: true });
 
         if (!user) {
