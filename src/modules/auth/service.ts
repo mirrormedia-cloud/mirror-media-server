@@ -29,11 +29,8 @@ async function createSession(req: FastifyRequest, user: any, token: string, plat
     const resolvedPlatform: "web" | "app" = platform ?? (user.platform === "app" ? "app" : "web");
     const resolvedAppType = resolvedPlatform === "app" ? (appType ?? user.app_type ?? "android") : null;
 
-    // Enforce one active session per platform slot — deactivate the existing one
-    await Session.update(
-        { is_active: false },
-        { where: { user_id: user.id, platform: resolvedPlatform, is_active: true } }
-    );
+    // Enforce one active session per platform slot — delete the existing one
+    await Session.destroy({ where: { user_id: user.id, platform: resolvedPlatform } });
 
     const client = getClientFields(req);
     const now = new Date();
