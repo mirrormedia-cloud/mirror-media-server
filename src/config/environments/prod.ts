@@ -13,11 +13,11 @@ const prodConfig = {
 
   database: {
     host: process.env.DATABASE_HOST || "",
-    port: Number(process.env.DATABASE_PORT || process.env.DATABASE_PORT || "5432"),
-    user: process.env.PROD_DATABASE_USER || process.env.DATABASE_USER || "postgres",
-    password: process.env.PROD_DATABASE_PASSWORD || process.env.DATABASE_PASSWORD || "postgres",
-    name: process.env.PROD_DATABASE_NAME || process.env.DATABASE_NAME || "",
-    ssl: true,
+    port: Number(process.env.DATABASE_PORT || "5432"),
+    user: process.env.DATABASE_USER || "postgres",
+    password:  process.env.DATABASE_PASSWORD || "postgres",
+    name: process.env.DATABASE_NAME || "",
+    ssl: process.env.DATABASE_SSL === "true",
   },
 
   logging: {

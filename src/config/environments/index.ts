@@ -3,7 +3,7 @@ import prod from "./prod";
 import { AppConfig, ConfigSchema } from "../schema";
 
 type AppEnv = "local" | "prod";
-const env = (process.env.APP_ENV || process.env.NODE_ENV || "local") as AppEnv;
+const env = (process.env.APP_ENV || "local") as AppEnv;
 
 const configs: Record<AppEnv, unknown> = { local, prod };
 const env_config: AppConfig = ConfigSchema.parse(configs[env]);

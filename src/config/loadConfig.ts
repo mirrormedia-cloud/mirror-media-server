@@ -8,7 +8,7 @@ import prod from "./environments/prod";
 export function loadConfig(): AppConfig {
   loadDotEnv();
 
-  const env = (process.env.SERVER_MODE || "local") as AppEnv;
+  const env = (process.env.SERVER_MODE || process.env.APP_ENV || "local") as AppEnv;
   const configs: Record<AppEnv, unknown> = { local, prod };
 
   const baseConfig = configs[env];
