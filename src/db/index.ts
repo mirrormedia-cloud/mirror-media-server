@@ -52,14 +52,18 @@ export const sequelize = new Sequelize({
 });
 
 export async function initDb() {
+  const { host, port, user, name, ssl } = config.database;
+  console.log(`🔌 DB config → host=${host} port=${port} user=${user} db=${name} ssl=${ssl}`);
   try {
     await sequelize.authenticate();
     console.log("✅ Database connected successfully");
     await sequelize.sync({ alter: true });
     console.log("✅ Database synced successfully");
     await ensureDefaultUserAndBackfill();
-  } catch (err) {
-    console.log("❌ Database connection failed", err);
+  } catch (err: any) {
+    console.error("❌ Database connection failed");
+    console.error("   message:", err?.message ?? err);
+    console.error("   code   :", err?.parent?.code ?? err?.code ?? "—");
     process.exit(1);
   }
 }

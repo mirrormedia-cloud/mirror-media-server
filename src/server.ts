@@ -11,6 +11,8 @@ import { start_token_refresh_cron, stop_token_refresh_cron } from "./services/so
 import { start_reminder_worker, stop_reminder_worker } from "./cron/reminder-worker";
 
 async function startServer() {
+  console.log(`⚙️  SERVER_MODE=${process.env.SERVER_MODE ?? "—"} APP_ENV=${process.env.APP_ENV ?? "—"} NODE_ENV=${process.env.NODE_ENV ?? "—"}`);
+  console.log(`⚙️  config.app.env=${config.app.env} port=${config.app.port}`);
   try {
     const app = await buildApp();
 
