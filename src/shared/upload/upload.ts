@@ -5,7 +5,7 @@ import { generateSlug } from "../utils/slug";
 import { config } from "../../config";
 import { error } from "../http/response";
 
-const UPLOAD_BASE = path.join(process.cwd(), "public");
+export const UPLOAD_BASE = path.join(process.cwd(), "public");
 
 interface UploadOptions {
   folder: string;

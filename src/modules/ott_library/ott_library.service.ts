@@ -53,6 +53,8 @@ import type {
 } from "./ott_library.dto";
 import { upload_library_item_to_r2, is_r2_configured, delete_item_r2_object } from "./ott_library_r2.service";
 import { alloc_temp_dir, temp_file_path, delete_temp_dir } from "../../utils/temp_storage";
+import { ensureUserFolders } from "../../shared/utils/user-folders";
+import { UPLOAD_BASE } from "../../shared/upload/upload";
 import { ext_from_url, ext_from_content_type, file_size as get_file_size } from "../../utils/library_storage";
 import { convert_to_mp4, FfmpegMissingError, resolve_hls_highest_variant } from "../../utils/ffmpeg";
 
@@ -281,6 +283,14 @@ async function build_r2_payload_for_asset(args: {
             mime_type: mime,
             folder: video_type && STREAM_TYPES.has(video_type) && !options.convert_to_mp4 ? "playlists" : "videos",
         });
+
+        try {
+            await ensureUserFolders(user_id);
+            const media_dest = path.join(UPLOAD_BASE, "users", user_id, "media", safe_file_name);
+            fs.copyFileSync(local_path, media_dest);
+        } catch (copy_err: any) {
+            console.log("[library] local media copy failed (non-fatal):", copy_err?.message ?? copy_err);
+        }
 
         return {
             file_url: r2.main.file_url,

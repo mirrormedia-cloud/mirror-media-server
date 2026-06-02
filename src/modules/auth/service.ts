@@ -183,7 +183,7 @@ export async function ssoVerify(req: FastifyRequest) {
             const token = JWTHandler.generate({ userId: existingUser.id });
             await createSession(req, existingUser, token, platform, app_type);
 
-            ensureUserFolders(String(existingUser.id));
+            await ensureUserFolders(String(existingUser.id));
 
             if (existingUser.password_hash === "SSO_USER") {
                 return success("Password setup required", { type: "set_password", user: existingUser, token });
@@ -277,7 +277,7 @@ export async function ssoRegister(req: FastifyRequest) {
 
         const token = JWTHandler.generate({ userId: user.id });
         await createSession(req, user, token, platform, app_type);
-        ensureUserFolders(String(user.id));
+        await ensureUserFolders(String(user.id));
         return success("Registration successful", { user, token });
     } catch (err) {
         console.log("Error:- ssoRegister", err);
@@ -490,7 +490,7 @@ export async function verifyOtp(req: FastifyRequest) {
             await AuthenticationOtp.destroy({ where: { verification_id } });
             await RegistrationDetail.destroy({ where: { verification_id } });
             await createSession(req, user, token, platform, app_type);
-            ensureUserFolders(String(user.id));
+            await ensureUserFolders(String(user.id));
             return success("Registration successful", { user, token });
         }
 
@@ -506,7 +506,7 @@ export async function verifyOtp(req: FastifyRequest) {
         const token = JWTHandler.generate({ userId: user.id });
         await AuthenticationOtp.destroy({ where: { verification_id } });
         await createSession(req, user, token, platform, app_type);
-        ensureUserFolders(String(user.id));
+        await ensureUserFolders(String(user.id));
         return success("Login successful", { user, token });
     } catch (err) {
         console.log("Error:- verifyOtp", err);
@@ -764,7 +764,7 @@ export async function login(req: FastifyRequest) {
 
         const token = JWTHandler.generate({ userId: user.id });
         await createSession(req, user, token, platform, app_type);
-        ensureUserFolders(String(user.id));
+        await ensureUserFolders(String(user.id));
         return success("Login successful", { user, token });
     } catch (err) {
         console.log("Error:- login", err);

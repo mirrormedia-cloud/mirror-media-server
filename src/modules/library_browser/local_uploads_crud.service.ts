@@ -201,6 +201,37 @@ async function load_file_titles_set(
 // in storage"). If a future feature wants storage-level delete, add a
 // helper that calls `delete_r2_object(storage_key)` here.
 
+/**
+ * Called at login time to eagerly set up the per-user Local Uploads OTT
+ * and its default "media" folder placeholder so the library grid is
+ * never empty on first visit. Idempotent — safe to call on every login.
+ */
+export async function ensure_default_library_folders(user_id: string): Promise<void> {
+    const ott = await ensure_local_uploads_ott(user_id);
+    const existing = await OttLibraryItem.findOne({
+        where: {
+            ott_id: ott.id,
+            user_id,
+            save_type: FOLDER_PLACEHOLDER_TYPE,
+            parent_folder_key: null as any,
+        } as any,
+    });
+    if (existing) return;
+    const default_key = new_folder_key();
+    const default_name = await unique_folder_name(ott.id as string, user_id, null, "media");
+    await OttLibraryItem.create({
+        user_id,
+        ott_id: ott.id,
+        parent_item_key: default_key,
+        parent_folder_key: null,
+        parent_title: default_name,
+        title: default_name,
+        save_type: FOLDER_PLACEHOLDER_TYPE,
+        metadata: { is_folder_placeholder: true, source: "local_upload", is_default: true },
+        saved_at: new Date(),
+    } as any);
+}
+
 // ── GET /api/library/local-uploads/init ──────────────────────────────
 // Returns (creating if needed) the per-user Local Uploads OTT id.
 export async function init_local_uploads(req: FastifyRequest) {
