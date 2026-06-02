@@ -79,9 +79,9 @@ async function ensureDefaultUserAndBackfill() {
   const { User } = await import("./models");
   const { hashPassword } = await import("../shared/security/password");
 
-  const DEFAULT_EMAIL = "ud@gmail.com";
-  const DEFAULT_PASSWORD = "ud@123";
-  const DEFAULT_USERNAME = "ud_default";
+  const DEFAULT_EMAIL = "mirror.mediacloud@gmail.com";
+  const DEFAULT_PASSWORD = "MirrorMedia@309";
+  const DEFAULT_USERNAME = "mirrormedia.cloud";
 
   let user = await User.findOne({ where: { email: DEFAULT_EMAIL } });
   if (!user) {
