@@ -32,6 +32,8 @@ export const ManualRegisterDto = z.object({
 export const VerifyOtpDto = z.object({
     verification_id: z.string().uuid(),
     otp: z.string().length(4),
+    platform: z.enum(["web", "app"]).default("web"),
+    app_type: z.enum(["android", "ios", "other"]).optional(),
 });
 
 export const ResendOtpDto = z.object({
@@ -68,6 +70,8 @@ export const ResetPasswordDto = z.object({
 export const LoginDto = z.object({
     email: z.string().email(),
     password: z.string().min(6),
+    platform: z.enum(["web", "app"]).default("web"),
+    app_type: z.enum(["android", "ios", "other"]).optional(),
 });
 
 export type SsoVerifyInput = z.infer<typeof SsoVerifyDto>;

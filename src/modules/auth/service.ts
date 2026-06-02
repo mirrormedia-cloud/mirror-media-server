@@ -25,7 +25,16 @@ function getClientFields(req: FastifyRequest) {
     };
 }
 
-async function createSession(req: FastifyRequest, user: any, token: string) {
+async function createSession(req: FastifyRequest, user: any, token: string, platform?: "web" | "app", appType?: string) {
+    const resolvedPlatform: "web" | "app" = platform ?? (user.platform === "app" ? "app" : "web");
+    const resolvedAppType = resolvedPlatform === "app" ? (appType ?? user.app_type ?? "android") : null;
+
+    // Enforce one active session per platform slot — deactivate the existing one
+    await Session.update(
+        { is_active: false },
+        { where: { user_id: user.id, platform: resolvedPlatform, is_active: true } }
+    );
+
     const client = getClientFields(req);
     const now = new Date();
     await Session.create({
@@ -36,9 +45,9 @@ async function createSession(req: FastifyRequest, user: any, token: string) {
         last_seen_at: now,
         is_active: true,
         register_type: user.register_type,
-        platform: user.platform || "web",
-        device_type: user.platform === "app" ? (user.app_type || "android") : "web",
-        app_type: user.app_type,
+        platform: resolvedPlatform,
+        device_type: resolvedPlatform === "app" ? resolvedAppType : "web",
+        app_type: resolvedAppType,
         notification_permission: "default",
         ...client,
     } as any);
@@ -419,7 +428,7 @@ export async function resendOtp(req: FastifyRequest) {
 
 export async function verifyOtp(req: FastifyRequest) {
     try {
-        const { verification_id, otp } = req.body as any;
+        const { verification_id, otp, platform = "web", app_type } = req.body as any;
 
         // Check if this verification_id is rate limited (by email from OTP or rate limit table)
         const otpRecord = await AuthenticationOtp.findOne({ where: { verification_id }, raw: true });
@@ -479,7 +488,7 @@ export async function verifyOtp(req: FastifyRequest) {
             const token = JWTHandler.generate({ userId: user.id });
             await AuthenticationOtp.destroy({ where: { verification_id } });
             await RegistrationDetail.destroy({ where: { verification_id } });
-            await createSession(req, user, token);
+            await createSession(req, user, token, platform, app_type);
             return success("Registration successful", { user, token });
         }
 
@@ -494,7 +503,7 @@ export async function verifyOtp(req: FastifyRequest) {
 
         const token = JWTHandler.generate({ userId: user.id });
         await AuthenticationOtp.destroy({ where: { verification_id } });
-        await createSession(req, user, token);
+        await createSession(req, user, token, platform, app_type);
         return success("Login successful", { user, token });
     } catch (err) {
         console.log("Error:- verifyOtp", err);
@@ -684,7 +693,7 @@ export async function resetPassword(req: FastifyRequest) {
 
 export async function login(req: FastifyRequest) {
     try {
-        const { email, password } = req.body as any;
+        const { email, password, platform = "web", app_type } = req.body as any;
         const user = await User.findOne({ where: { email }, raw: true });
 
         if (!user) {
@@ -751,7 +760,7 @@ export async function login(req: FastifyRequest) {
         }
 
         const token = JWTHandler.generate({ userId: user.id });
-        await createSession(req, user, token);
+        await createSession(req, user, token, platform, app_type);
         return success("Login successful", { user, token });
     } catch (err) {
         console.log("Error:- login", err);
