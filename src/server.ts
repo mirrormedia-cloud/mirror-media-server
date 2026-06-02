@@ -9,6 +9,7 @@ import { start_auto_publish_cron, stop_auto_publish_cron } from "./services/soci
 import { start_youtube_copyright_sweep, stop_youtube_copyright_sweep } from "./services/social/youtube_copyright_sweep";
 import { start_token_refresh_cron, stop_token_refresh_cron } from "./services/social/token_refresh_cron";
 import { start_reminder_worker, stop_reminder_worker } from "./cron/reminder-worker";
+import { start_health_ping_worker, stop_health_ping_worker } from "./cron/health-ping-worker";
 
 async function startServer() {
   console.log(`⚙️  SERVER_MODE=${process.env.SERVER_MODE ?? "—"} APP_ENV=${process.env.APP_ENV ?? "—"} NODE_ENV=${process.env.NODE_ENV ?? "—"}`);
@@ -39,6 +40,9 @@ async function startServer() {
     // 5h / 1h) whose time has arrived. Idempotent — rows are flipped to
     // `sent` so a subsequent tick can't double-fire.
     start_reminder_worker();
+    // Background: every minute, ping /health on the Render deployment to
+    // keep the free-tier instance warm and confirm it is reachable.
+    start_health_ping_worker();
   } catch (err) {
     console.log("❌ Failed to start server", err);
     process.exit(1);
@@ -58,6 +62,7 @@ async function shutdown(signal: string) {
   try { stop_youtube_copyright_sweep(); } catch { /* noop */ }
   try { stop_token_refresh_cron(); } catch { /* noop */ }
   try { stop_reminder_worker(); } catch { /* noop */ }
+  try { stop_health_ping_worker(); } catch { /* noop */ }
   try { await closeDb(); } catch { /* noop */ }
   process.exit(0);
 }

@@ -132,6 +132,11 @@ export async function buildApp() {
   app.register(dbPlugin);
   app.register(errorPlugin);
 
+  // Public health-check — no auth, used by the health-ping cron and uptime monitors.
+  app.get("/health", (_req, res) => {
+    res.status(200).send({ status: "ok", message: "👋 Welcome — mirror-media-server is alive!", ts: new Date().toISOString() });
+  });
+
   app.register(authRoutes,    { prefix: "/api/auth" });
   app.register(profileRoutes, { prefix: "/api/profile" });
   // Public — Google OAuth callback. Lives outside the JWT scope because
