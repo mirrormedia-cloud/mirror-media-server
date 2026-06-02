@@ -178,12 +178,12 @@ async function resetOtpLimits(email: string) {
 
 export async function ssoVerify(req: FastifyRequest) {
     try {
-        const { email, username, first_name, last_name, profile_picture } = req.body as any;
+        const { email, username, first_name, last_name, profile_picture, platform = "web", app_type } = req.body as any;
 
         const existingUser = await User.findOne({ where: { email }, raw: true });
         if (existingUser) {
             const token = JWTHandler.generate({ userId: existingUser.id });
-            await createSession(req, existingUser, token);
+            await createSession(req, existingUser, token, platform, app_type);
 
             if (existingUser.password_hash === "SSO_USER") {
                 return success("Password setup required", { type: "set_password", user: existingUser, token });
@@ -221,7 +221,7 @@ export async function ssoVerify(req: FastifyRequest) {
 
 export async function ssoRegister(req: FastifyRequest) {
     try {
-        const { verification_id, first_name, last_name, profile_picture } = req.body as any;
+        const { verification_id, first_name, last_name, profile_picture, platform = "web", app_type } = req.body as any;
         console.log("[ssoRegister] verification_id:", verification_id);
         const pendingSso = await SsoVerificationDetail.findOne({ where: { verification_id }, raw: true });
         console.log("[ssoRegister] pendingSso:", pendingSso);
@@ -276,7 +276,7 @@ export async function ssoRegister(req: FastifyRequest) {
         await SsoVerificationDetail.destroy({ where: { verification_id } });
 
         const token = JWTHandler.generate({ userId: user.id });
-        await createSession(req, user, token);
+        await createSession(req, user, token, platform, app_type);
         return success("Registration successful", { user, token });
     } catch (err) {
         console.log("Error:- ssoRegister", err);

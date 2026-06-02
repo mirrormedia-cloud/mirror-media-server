@@ -6,6 +6,8 @@ export const SsoVerifyDto = z.object({
     first_name: z.string().optional(),
     last_name: z.string().optional(),
     profile_picture: z.string().url().optional(),
+    platform: z.enum(["web", "app"]).default("web"),
+    app_type: z.enum(["android", "ios", "other"]).optional(),
 });
 
 export const SsoRegisterDto = z.object({
@@ -14,6 +16,8 @@ export const SsoRegisterDto = z.object({
     first_name: z.string().min(1).optional(),
     last_name: z.string().min(1).optional(),
     profile_picture: z.string().min(1).optional(),
+    platform: z.enum(["web", "app"]).default("web"),
+    app_type: z.enum(["android", "ios", "other"]).optional(),
 });
 
 export const GoogleTokenDto = z.object({
