@@ -10,6 +10,7 @@ import { start_youtube_copyright_sweep, stop_youtube_copyright_sweep } from "./s
 import { start_token_refresh_cron, stop_token_refresh_cron } from "./services/social/token_refresh_cron";
 import { start_reminder_worker, stop_reminder_worker } from "./cron/reminder-worker";
 import { start_health_ping_worker, stop_health_ping_worker } from "./cron/health-ping-worker";
+import { start_daily_digest_worker, stop_daily_digest_worker } from "./cron/daily-digest-worker";
 
 async function startServer() {
   console.log(`⚙️  SERVER_MODE=${process.env.SERVER_MODE ?? "—"} APP_ENV=${process.env.APP_ENV ?? "—"} NODE_ENV=${process.env.NODE_ENV ?? "—"}`);
@@ -23,7 +24,7 @@ async function startServer() {
     //   - ngrok tunnels (ngrok forwards to a non-loopback interface)
     // 127.0.0.1 was rejecting every cross-interface request as
     // ERR_CONNECTION_REFUSED at the TCP layer (CORS never even got a chance to run).
-    await app.listen({ port: config.app.port, host: "0.0.0.0" });
+    await app.listen({ port: config.app.port || 3002, host: "0.0.0.0" });
     console.log(`🚀 Server running at port ${config.app.port} (binding 0.0.0.0)`);
     // Background: every minute, push calendar schedule slots whose time
     // has come to social, and publish IG containers held for scheduled
@@ -43,6 +44,9 @@ async function startServer() {
     // Background: every minute, ping /health on the Render deployment to
     // keep the free-tier instance warm and confirm it is reachable.
     start_health_ping_worker();
+    // Background: every minute, check if it's 08:00 IST and send each
+    // WhatsApp-enabled user their daily plan overview (events + uploads + failures).
+    start_daily_digest_worker();
   } catch (err) {
     console.log("❌ Failed to start server", err);
     process.exit(1);
@@ -63,6 +67,7 @@ async function shutdown(signal: string) {
   try { stop_token_refresh_cron(); } catch { /* noop */ }
   try { stop_reminder_worker(); } catch { /* noop */ }
   try { stop_health_ping_worker(); } catch { /* noop */ }
+  try { stop_daily_digest_worker(); } catch { /* noop */ }
   try { await closeDb(); } catch { /* noop */ }
   process.exit(0);
 }

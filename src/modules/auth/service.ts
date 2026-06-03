@@ -774,7 +774,7 @@ export async function login(req: FastifyRequest) {
 
 export async function googleTokenVerify(req: FastifyRequest) {
     try {
-        const { token, token_type = "access_token" } = req.body as any;
+        const { token, token_type = "access_token", platform = "app", app_type } = req.body as any;
 
         let email: string;
         let given_name: string | null = null;
@@ -839,6 +839,8 @@ export async function googleTokenVerify(req: FastifyRequest) {
             last_name: family_name,
             profile_picture: picture,
             username: derivedUsername,
+            platform,
+            app_type,
         };
 
         return ssoVerify(req);

@@ -137,6 +137,18 @@ export async function buildApp() {
     res.status(200).send({ status: "ok", message: "👋 Welcome — mirror-media-server is alive!", ts: new Date().toISOString() });
   });
 
+  // Public test route — triggers the daily WhatsApp digest immediately (no auth).
+  // Hit GET /digest/send-now to fire it outside the 08:00 schedule window.
+  app.get("/digest/send-now", async (_req, res) => {
+    try {
+      const { send_daily_digests } = await import("./services/notification/daily-digest.service");
+      const result = await send_daily_digests();
+      res.status(200).send({ status: "ok", ...result });
+    } catch (err: any) {
+      res.status(500).send({ status: "error", message: err?.message ?? String(err) });
+    }
+  });
+
   app.register(authRoutes,    { prefix: "/api/auth" });
   app.register(profileRoutes, { prefix: "/api/profile" });
   // Public — Google OAuth callback. Lives outside the JWT scope because
