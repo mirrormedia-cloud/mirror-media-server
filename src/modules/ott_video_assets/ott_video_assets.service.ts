@@ -99,6 +99,81 @@ async function load_source_response(args: {
     return null;
 }
 
+/**
+ * Core upsert logic — takes a fully-resolved response and a mapping, creates
+ * new OttVideoAsset rows for URLs that haven't been seen before (downloaded_at
+ * stays null so Download All picks them up), and patches metadata on existing
+ * rows without touching downloaded_at.
+ */
+export async function capture_for_node(args: {
+    ott_id: string;
+    api_node_id: string;
+    response: any;
+    mapping: {
+        list_path?: string | null;
+        video_url_paths: string[];
+        title_path?: string | null;
+        description_path?: string | null;
+        thumbnail_path?: string | null;
+        quality_path?: string | null;
+        language_path?: string | null;
+        duration_path?: string | null;
+    };
+}): Promise<{ created: number; updated: number; already_saved: number }> {
+    const { ott_id, api_node_id, response, mapping } = args;
+    let iter_count = 1;
+    if (mapping.list_path) {
+        const arr = get_value_by_path(response, mapping.list_path);
+        if (Array.isArray(arr)) iter_count = arr.length;
+    }
+
+    let created = 0, updated = 0, already_saved = 0;
+
+    for (let i = 0; i < iter_count; i++) {
+        const idx = mapping.list_path ? i : 0;
+        const get = (p: string | null | undefined): string | null => {
+            if (!p) return null;
+            const v = get_value_by_path(response, replace_array_index_in_path(p, idx));
+            return (v !== undefined && v !== null) ? (typeof v === "string" ? v : String(v)) : null;
+        };
+        for (const raw_path of mapping.video_url_paths) {
+            const url = get_value_by_path(response, replace_array_index_in_path(raw_path, idx));
+            if (typeof url !== "string" || !url) continue;
+            try {
+                const existing = await OttVideoAsset.findOne({ where: { ott_id, video_url: url } as any });
+                if (existing) {
+                    const patch: any = {};
+                    if (!existing.title && get(mapping.title_path)) patch.title = get(mapping.title_path);
+                    if (!existing.description && get(mapping.description_path)) patch.description = get(mapping.description_path);
+                    if (!existing.thumbnail && get(mapping.thumbnail_path)) patch.thumbnail = get(mapping.thumbnail_path);
+                    if (!existing.quality && get(mapping.quality_path)) patch.quality = get(mapping.quality_path);
+                    if (!existing.language && get(mapping.language_path)) patch.language = get(mapping.language_path);
+                    if (!existing.duration && get(mapping.duration_path)) patch.duration = get(mapping.duration_path);
+                    if (Object.keys(patch).length > 0) { await existing.update(patch); updated += 1; }
+                    else already_saved += 1;
+                } else {
+                    await OttVideoAsset.create({
+                        ott_id, api_node_id,
+                        video_url: url,
+                        video_type: detect_video_type(url),
+                        title: get(mapping.title_path),
+                        description: get(mapping.description_path),
+                        thumbnail: get(mapping.thumbnail_path),
+                        quality: get(mapping.quality_path),
+                        language: get(mapping.language_path),
+                        duration: get(mapping.duration_path),
+                        metadata: { source_path: raw_path, captured_index: i },
+                        status: "active",
+                        downloaded_at: null,
+                    } as any);
+                    created += 1;
+                }
+            } catch { /* skip failed rows */ }
+        }
+    }
+    return { created, updated, already_saved };
+}
+
 export async function capture_video_assets(req: FastifyRequest) {
     const { ott_id } = req.params as { ott_id: string };
     const body = req.body as CaptureVideoAssetsInput;
@@ -344,6 +419,20 @@ export async function delete_video_asset(req: FastifyRequest) {
     if (!asset) return error(HttpStatus.NOT_FOUND, "Video asset not found");
     await asset.destroy();
     return success("video asset deleted successfully", { id: video_asset_id });
+}
+
+/**
+ * POST /:ott_id/video_assets/reset_downloaded
+ * Clears downloaded_at on every video asset for this OTT so that a fresh
+ * sync's content becomes eligible for Download All again.
+ */
+export async function reset_downloaded(req: FastifyRequest) {
+    const { ott_id } = req.params as { ott_id: string };
+    const [updated] = await OttVideoAsset.update(
+        { downloaded_at: null } as any,
+        { where: { ott_id, downloaded_at: { [Op.ne]: null } } as any },
+    );
+    return success(`Reset download status on ${updated} asset${updated === 1 ? "" : "s"}`, { updated });
 }
 
 /**

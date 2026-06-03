@@ -9,6 +9,7 @@ import {
     OttCardAction,
 } from "../../db/models";
 import { card_action_dto } from "../ott_card_actions/ott_card_actions.service";
+import { capture_for_node } from "../ott_video_assets/ott_video_assets.service";
 import { success, error } from "../../shared/http/response";
 import { HttpStatus } from "../../shared/http/status";
 import { call_external_ott_api, type ExternalCallResult } from "../../utils/ott_proxy";
@@ -1015,6 +1016,13 @@ export async function sync_ott_apis(req: FastifyRequest) {
                 error_message: run.last_error,
             });
             await node.update({ last_synced_at: new Date() });
+            // Auto-capture new video assets if this node has a capture_mapping.
+            if (run.final_success && run.merged_response) {
+                const mapping = (node.card_config as any)?.capture_mapping;
+                if (mapping && Array.isArray(mapping.video_url_paths) && mapping.video_url_paths.length > 0) {
+                    capture_for_node({ ott_id, api_node_id: node.id!, response: run.merged_response, mapping }).catch(() => {});
+                }
+            }
             synced.push({
                 api_id: node.id,
                 name: node.name,
@@ -1044,6 +1052,13 @@ export async function sync_ott_apis(req: FastifyRequest) {
         });
         await persist_node_response(node, ott_id, result);
         await node.update({ last_synced_at: new Date() });
+        // Auto-capture new video assets if this node has a capture_mapping.
+        if (result.success && result.data) {
+            const mapping = (node.card_config as any)?.capture_mapping;
+            if (mapping && Array.isArray(mapping.video_url_paths) && mapping.video_url_paths.length > 0) {
+                capture_for_node({ ott_id, api_node_id: node.id!, response: result.data, mapping }).catch(() => {});
+            }
+        }
         synced.push({
             api_id: node.id,
             name: node.name,
