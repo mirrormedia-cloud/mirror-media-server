@@ -66,6 +66,9 @@ export class OttVideoAsset extends Model<OttVideoAsset> {
     @Column({ type: DataType.STRING(50), allowNull: false, defaultValue: "active" })
     status: string | undefined;
 
+    @Column({ type: DataType.DATE, allowNull: true })
+    downloaded_at: Date | null | undefined;
+
     @BelongsTo(() => OttPlatform)
     ott: OttPlatform | undefined;
 

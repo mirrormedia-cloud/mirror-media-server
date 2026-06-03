@@ -44,6 +44,7 @@ function video_asset_dto(v: OttVideoAsset) {
         duration: v.duration ?? null,
         metadata: v.metadata ?? {},
         status: v.status,
+        downloaded_at: ts(v.downloaded_at),
         createdAt: ts((v as any).createdAt),
         updatedAt: ts((v as any).updatedAt),
     };
@@ -454,6 +455,10 @@ export async function download_video_asset(req: FastifyRequest, reply: FastifyRe
             .header("Content-Type", content_type)
             .header("Content-Disposition", `attachment; filename="${filename}"`);
         if (content_length) reply.header("Content-Length", String(content_length));
+
+        // Mark as downloaded — fire-and-forget, don't block the stream.
+        asset.update({ downloaded_at: new Date() } as any).catch(() => {});
+
         return reply.send(upstream.data);
     } catch (err: any) {
         return reply.status(HttpStatus.BAD_GATEWAY).send(
