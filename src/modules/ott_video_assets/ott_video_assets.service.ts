@@ -439,7 +439,7 @@ export async function reset_downloaded(req: FastifyRequest) {
 function extract_video_urls_from_value(value: any, out: Set<string>): void {
     if (typeof value === "string") {
         if (value.startsWith("http") || value.startsWith("//")) {
-            const v = value.toLowerCase().split("?")[0];
+            const v = value.toLowerCase().split("?")[0] ?? "";
             if (
                 v.endsWith(".m3u8") || v.includes(".m3u8?") ||
                 v.endsWith(".mp4")  || v.includes(".mp4?")  ||
