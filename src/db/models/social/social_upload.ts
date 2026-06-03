@@ -121,6 +121,9 @@ export class SocialUpload extends Model<SocialUpload> {
     @Column({ type: DataType.UUID, allowNull: true })
     analysis_result_id: string | null | undefined;
 
+    @Column({ type: DataType.DATE, allowNull: true, defaultValue: DataType.NOW })
+    updated_at?: Date;
+
     /**
      * Platform-shaped details object — the exact values sent to the
      * platform API. Keeps a per-platform record for debugging when one
