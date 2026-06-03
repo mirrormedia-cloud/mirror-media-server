@@ -12,6 +12,7 @@ import {
     bulk_delete_video_assets,
     download_video_asset,
     reset_downloaded,
+    auto_capture_all,
 } from "./ott_video_assets.service";
 import { validate } from "../../shared/http/validate";
 import { HttpStatus } from "../../shared/http/status";
@@ -49,6 +50,8 @@ export const ottVideoAssetsRoutes: FastifyPluginAsync = async (app) => {
     app.post("/:ott_id/video_assets/bulk_delete", wrap(bulk_delete_video_assets));
     // Clear downloaded_at on all assets for this OTT (called after sync).
     app.post("/:ott_id/video_assets/reset_downloaded", wrap(reset_downloaded));
+    // Auto-detect and capture video URLs from all stored API responses.
+    app.post("/:ott_id/video_assets/auto_capture", wrap(auto_capture_all));
 
     // Download streams the upstream file directly to the response — must NOT be wrapped
     // with the envelope helper because we set Content-Type/Content-Disposition manually.

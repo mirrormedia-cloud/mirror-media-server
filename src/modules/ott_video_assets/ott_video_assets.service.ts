@@ -435,6 +435,75 @@ export async function reset_downloaded(req: FastifyRequest) {
     return success(`Reset download status on ${updated} asset${updated === 1 ? "" : "s"}`, { updated });
 }
 
+/** Recursively extract every http(s) string that looks like a video URL. */
+function extract_video_urls_from_value(value: any, out: Set<string>): void {
+    if (typeof value === "string") {
+        if (value.startsWith("http") || value.startsWith("//")) {
+            const v = value.toLowerCase().split("?")[0];
+            if (
+                v.endsWith(".m3u8") || v.includes(".m3u8?") ||
+                v.endsWith(".mp4")  || v.includes(".mp4?")  ||
+                v.endsWith(".webm") || v.includes(".webm?") ||
+                v.endsWith(".mpd")  || v.includes(".mpd?")  ||
+                v.endsWith(".mov")  || v.includes(".mov?")  ||
+                v.endsWith(".mkv")  || v.includes(".mkv?")  ||
+                v.endsWith(".ts")   || v.includes(".ts?")
+            ) {
+                out.add(value);
+            }
+        }
+        return;
+    }
+    if (Array.isArray(value)) { for (const item of value) extract_video_urls_from_value(item, out); return; }
+    if (value && typeof value === "object") { for (const v of Object.values(value)) extract_video_urls_from_value(v, out); }
+}
+
+/**
+ * POST /:ott_id/video_assets/auto_capture
+ * Scans every stored root and child API response for this OTT, extracts all
+ * video-like URLs automatically, and creates new OttVideoAsset rows (downloaded_at = null)
+ * for any URL not yet seen. Existing rows are left untouched so already-downloaded
+ * videos are not re-queued.
+ */
+export async function auto_capture_all(req: FastifyRequest) {
+    const { ott_id } = req.params as { ott_id: string };
+    const ott = await OttPlatform.findOne({ where: { id: ott_id, user_id: (req as any).userId } as any });
+    if (!ott) return error(HttpStatus.NOT_FOUND, "OTT not found");
+
+    const root_rows  = await OttApiResponse.findAll({ where: { ott_id } as any });
+    const child_rows = await OttChildApiItemResponse.findAll({ where: { ott_id } as any });
+
+    let created = 0;
+    let skipped = 0;
+
+    const process = async (api_node_id: string, response: any) => {
+        if (!response) return;
+        const urls = new Set<string>();
+        extract_video_urls_from_value(response, urls);
+        for (const url of urls) {
+            try {
+                const existing = await OttVideoAsset.findOne({ where: { ott_id, video_url: url } as any });
+                if (existing) { skipped++; continue; }
+                await OttVideoAsset.create({
+                    ott_id,
+                    api_node_id,
+                    video_url: url,
+                    video_type: detect_video_type(url),
+                    status: "active",
+                    metadata: { auto_captured: true },
+                    downloaded_at: null,
+                } as any);
+                created++;
+            } catch { /* skip individual failures */ }
+        }
+    };
+
+    for (const row of root_rows)  await process(row.api_node_id!,  row.response);
+    for (const row of child_rows) await process(row.child_api_id!, row.response);
+
+    return success(`Auto-captured ${created} new video asset${created === 1 ? "" : "s"}`, { created, skipped });
+}
+
 /**
  * Bulk-delete captured video assets — body: { ids: string[] }. Used by
  * the desktop-style multi-select in the captured videos page. Reports
