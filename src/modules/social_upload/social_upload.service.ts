@@ -345,7 +345,14 @@ export async function create_upload(req: FastifyRequest) {
 
     for (const platform of body.platforms) {
         // ── PHASE 3: build final details (after analysis has resolved) ─
-        const details = resolve_details(platform);
+        const details_raw = resolve_details(platform);
+        // When auto_details is on and analysis failed, ensure there is
+        // always a title so the upload proceeds. Fallback chain:
+        //   1. user-supplied manual_details.title
+        //   2. static "Latest Video"
+        const details = (body.auto_details && general_analysis_error && !details_raw.title)
+            ? { ...details_raw, title: ((body as any).manual_details?.title?.trim()) || 'Latest Video' }
+            : details_raw;
         flog("final details built", {
             platform,
             source: details.source,
@@ -437,19 +444,6 @@ export async function create_upload(req: FastifyRequest) {
                     redirect_url: "/dashboard/social-accounts",
                 });
             } catch (err) { console.log("Error:- push platform_token_error", err); }
-            results.push(upload_dto(upload));
-            continue;
-        }
-
-        // If auto_details was on and analysis failed AND the user supplied
-        // no manual fields, we cannot upload meaningful content. Mark it
-        // failed instead of pushing a blank post to the platform.
-        if (body.auto_details && general_analysis_error
-            && !details.title && !details.caption && !details.description
-            && (!details.tags || details.tags.length === 0)) {
-            const msg = `Analysis failed and no manual fields supplied: ${general_analysis_error}`;
-            flog("platform upload skipped", { platform, upload_id: upload.id, reason: "analysis_failed_no_manual" });
-            await upload.update({ status: "failed", error_message: msg.slice(0, 500) });
             results.push(upload_dto(upload));
             continue;
         }

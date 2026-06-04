@@ -17,7 +17,7 @@ const PreviewBaseDto = z.object({
     scheduled: z.boolean().optional().default(true),
     platforms: z.array(z.enum(SUPPORTED_PLATFORMS)).min(1, { message: "at least one platform is required" }),
     frequency: z.enum(FREQUENCIES).optional().nullable(),
-    release_count: z.coerce.number().int().min(1).max(50).optional().default(1),
+    release_count: z.coerce.number().int().min(1).max(500).optional().default(1),
     upload_times: z.array(time_string).optional().default([]),
     start_date: date_string.optional().nullable(),
     end_date: date_string.optional().nullable(),
