@@ -29,6 +29,7 @@ import {
     is_r2_configured,
     sanitize_object_name,
     delete_r2_object,
+    generate_read_signed_url,
 } from "../../services/storage/r2_storage.service";
 import { config } from "../../config";
 
@@ -78,6 +79,37 @@ export async function delete_item_r2_object(item: {
     const key = resolve_item_r2_key(item);
     if (!key) return;
     await delete_r2_object(key);
+}
+
+/**
+ * Return a URL suitable for streaming a library item's bytes to a social
+ * platform API. Preference order:
+ *
+ *   1. Short-lived presigned GET URL generated from the stored R2 key.
+ *      Works with private buckets; the signature is embedded in the
+ *      query string so platforms (Meta, YouTube) can fetch it with a
+ *      plain HTTP GET — no extra auth headers needed.
+ *   2. Permanent public CDN URL (`file_url`) — fallback for rows that
+ *      pre-date r2_key persistence.
+ *
+ * Throws when neither source is available so the caller surfaces an
+ * actionable error instead of silently passing null downstream.
+ *
+ * `expires_in_seconds` defaults to 2 hours — generous enough for
+ * large-file YouTube streams and for Meta's async container ingestion.
+ */
+export async function resolve_upload_url(
+    item: { file_url?: string | null | undefined; metadata?: any },
+    expires_in_seconds = 2 * 60 * 60,
+): Promise<string> {
+    const key = resolve_item_r2_key(item);
+    if (key && is_r2_configured()) {
+        return generate_read_signed_url({ key, expires_in: expires_in_seconds });
+    }
+    if (item.file_url) return item.file_url;
+    throw new Error(
+        "Library item has no R2 key and no file_url — upload to storage first before pushing to social.",
+    );
 }
 
 export interface R2UploadResult {

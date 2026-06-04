@@ -44,6 +44,7 @@ import {
     sweep_youtube_copyright,
     check_and_handle_one,
 } from "../../services/social/youtube_copyright_sweep";
+import { resolve_upload_url } from "../ott_library/ott_library_r2.service";
 import { ensure_analysis } from "../media_analysis/media_analysis.service";
 import type { AnalysisPlatform } from "../../services/social/gemini_analysis.service";
 import type { MediaAnalysisResult } from "../../db/models";
@@ -167,13 +168,19 @@ export async function create_upload(req: FastifyRequest) {
     });
     if (!item) return error(HttpStatus.NOT_FOUND, "Library item not found");
 
-    // Library items identify themselves via `file_url` (R2 CDN URL).
-    // Social uploads stream from that URL — no row, no upload.
-    const file_url: string | null = ((item as any).file_url ?? null) as string | null;
-    if (!file_url) {
+    // Resolve the URL the social upload pipeline will stream bytes from.
+    // Prefer a short-lived presigned GET URL generated from the stored R2
+    // key — this works with private buckets and the URL expires after 2 h.
+    // Falls back to the permanent public CDN URL for older rows that have
+    // no persisted key. Both paths stream directly from R2 to the platform
+    // API without downloading the file to local disk first.
+    let file_url: string;
+    try {
+        file_url = await resolve_upload_url(item as any);
+    } catch (err: any) {
         return error(
             HttpStatus.BAD_REQUEST,
-            "Library item has no file_url. Upload to storage first before pushing to social.",
+            err?.message ?? "Library item has no file URL. Upload to storage first before pushing to social.",
         );
     }
 
