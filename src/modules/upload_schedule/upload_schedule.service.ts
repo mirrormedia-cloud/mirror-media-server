@@ -6,6 +6,7 @@ import {
     UploadScheduleBatch,
     UploadScheduleItem,
     CalendarEvent,
+    SocialUpload,
 } from "../../db/models";
 import { sequelize } from "../../db";
 import { success, error } from "../../shared/http/response";
@@ -751,7 +752,7 @@ export async function cancel_schedule(req: FastifyRequest) {
 
         const items = await UploadScheduleItem.findAll({
             where: { batch_id, user_id } as any,
-            attributes: ["calendar_event_id"],
+            attributes: ["id", "calendar_event_id"],
             raw: true,
         });
         cancelled_event_ids = (items as any[])
@@ -761,6 +762,23 @@ export async function cancel_schedule(req: FastifyRequest) {
             await CalendarEvent.update(
                 { status: "cancelled" } as any,
                 { where: { id: cancelled_event_ids, user_id } as any, transaction: tx },
+            );
+        }
+
+        // Cancel any pending social_uploads that were queued from this
+        // schedule's items so they disappear from the Social Uploads list.
+        const item_ids = (items as any[]).map(i => i.id).filter(Boolean) as string[];
+        if (item_ids.length > 0) {
+            await SocialUpload.update(
+                { status: "cancelled" } as any,
+                {
+                    where: {
+                        schedule_item_id: { [Op.in]: item_ids },
+                        user_id,
+                        status: ["scheduled", "draft"],
+                    } as any,
+                    transaction: tx,
+                },
             );
         }
     });
@@ -798,7 +816,7 @@ export async function delete_schedule(req: FastifyRequest) {
         // recoverable but invisible to subsequent queries.
         const items = await UploadScheduleItem.findAll({
             where: { batch_id, user_id } as any,
-            attributes: ["calendar_event_id"],
+            attributes: ["id", "calendar_event_id"],
             raw: true,
         });
         deleted_event_ids = (items as any[])
@@ -807,6 +825,24 @@ export async function delete_schedule(req: FastifyRequest) {
         if (deleted_event_ids.length > 0) {
             await CalendarEvent.destroy({ where: { id: deleted_event_ids, user_id } as any, transaction: tx });
         }
+
+        // Cancel any still-pending social_uploads queued from this schedule
+        // so they no longer appear in the Social Uploads list after deletion.
+        const item_ids = (items as any[]).map(i => i.id).filter(Boolean) as string[];
+        if (item_ids.length > 0) {
+            await SocialUpload.update(
+                { status: "cancelled" } as any,
+                {
+                    where: {
+                        schedule_item_id: { [Op.in]: item_ids },
+                        user_id,
+                        status: ["scheduled", "draft"],
+                    } as any,
+                    transaction: tx,
+                },
+            );
+        }
+
         // Items cascade via FK on batch destroy, but we destroy explicitly so
         // the paranoid timestamp is set on each row consistently.
         await UploadScheduleItem.destroy({ where: { batch_id, user_id } as any, transaction: tx });

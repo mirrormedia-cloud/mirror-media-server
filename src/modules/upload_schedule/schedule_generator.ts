@@ -50,12 +50,13 @@ function parse_date_only(d: string): Date {
     const y = parts[0] ?? 1970;
     const m = parts[1] ?? 1;
     const day = parts[2] ?? 1;
-    return new Date(y, m - 1, day, 0, 0, 0, 0);
+    // Use UTC explicitly so the result is not affected by the server's local timezone.
+    return new Date(Date.UTC(y, m - 1, day, 0, 0, 0, 0));
 }
 
 function add_days(d: Date, days: number): Date {
     const next = new Date(d.getTime());
-    next.setDate(next.getDate() + days);
+    next.setUTCDate(next.getUTCDate() + days);
     return next;
 }
 
@@ -63,8 +64,9 @@ function combine(date: Date, time_hhmm: string): string {
     const parts = time_hhmm.split(":").map(Number);
     const hh = parts[0] ?? 0;
     const mm = parts[1] ?? 0;
-    const dt = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hh, mm, 0, 0);
-    return dt.toISOString();
+    // Use Date.UTC so the stored time is exactly the HH:MM the caller passed,
+    // independent of the server's local timezone.
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hh, mm, 0, 0)).toISOString();
 }
 
 /**
@@ -85,10 +87,10 @@ function* iterate_dates(args: GenerateScheduleArgs, cap: number): Generator<Date
         if (args.frequency === "every_day" || args.frequency === "custom_range") {
             include = true;
         } else if (args.frequency === "every_week") {
-            const wd = cursor.getDay();
+            const wd = cursor.getUTCDay();
             include = (args.weekdays ?? []).includes(wd);
         } else if (args.frequency === "every_month") {
-            const dom = cursor.getDate();
+            const dom = cursor.getUTCDate();
             include = (args.month_days ?? []).includes(dom);
         }
 

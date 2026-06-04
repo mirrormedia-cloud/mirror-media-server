@@ -67,6 +67,23 @@ function clog(step: string, data?: Record<string, any>) {
  * "should be hours apart" slots back-to-back if both somehow look due
  * at the same moment.
  */
+async function maybe_complete_batch(batch_id: string | null | undefined) {
+    if (!batch_id) return;
+    const remaining = await UploadScheduleItem.count({
+        where: {
+            batch_id,
+            status: { [Op.notIn]: ["uploaded", "failed", "cancelled"] },
+        } as any,
+    });
+    if (remaining === 0) {
+        await UploadScheduleBatch.update(
+            { status: "completed" } as any,
+            { where: { id: batch_id, status: { [Op.notIn]: ["cancelled", "completed"] } } as any }
+        );
+        clog("batch_completed", { batch_id });
+    }
+}
+
 async function fire_due_schedule_items() {
     const now = new Date();
 
@@ -182,6 +199,7 @@ async function fire_due_schedule_items() {
                     status: "failed",
                     error_message: (result.error.message ?? "Bridge rejected").slice(0, 500),
                 } as any);
+                await maybe_complete_batch((item as any).batch_id);
                 continue;
             }
             const uploads = result?.data?.uploads ?? [];
@@ -193,6 +211,7 @@ async function fire_due_schedule_items() {
             } as any);
             clog("slot_done", { schedule_item_id: item.id, ok, failed });
             fired += 1;
+            await maybe_complete_batch((item as any).batch_id);
         } catch (err: any) {
             clog("slot_failed", { schedule_item_id: item.id, error: err?.message ?? String(err) });
             await item.update({
@@ -217,6 +236,7 @@ async function fire_due_schedule_items() {
                     redirect_url: "/dashboard/schedules",
                 });
             } catch (notify_err) { console.log("Error:- cron push scheduled_upload_failed", notify_err); }
+            await maybe_complete_batch((item as any).batch_id);
         }
     }
     return { fired, skipped };
