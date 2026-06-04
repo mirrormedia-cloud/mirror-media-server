@@ -209,10 +209,10 @@ FACEBOOK REQUIREMENTS:
 - Do NOT return "caption".
 - title must contain two parts:
   1. Main title text
-  2. 10-15 relevant hashtags appended at the end
+  2. 5-6 relevant hashtags appended at the end
 - hashtags array must contain the SAME hashtags used at the end of the title.
-- Main title text must be maximum 160 characters.
-- Hashtags are NOT counted in the 160 character title limit.
+- Main title text must be maximum 140 characters.
+- Hashtags are NOT counted in the 140 character title limit.
 - Use 1-2 emojis if suitable.
 - Title must be emotional, share-friendly, simple, and optimized for Facebook video reach.
 - Hashtags must be relevant to the video topic, niche, language, emotion, and audience.
