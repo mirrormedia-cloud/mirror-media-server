@@ -15,46 +15,46 @@ import {
 import { sendPushToUser } from "./firebase-notification.service";
 
 export type ReminderType =
-    | "before_2_days"
-    | "before_1_day"
-    | "before_5_hours"
+    // | "before_2_days"
+    // | "before_1_day"
+    // | "before_5_hours"
     | "before_1_hour";
 
 const OFFSETS_MS: Record<ReminderType, number> = {
-    before_2_days: 2 * 24 * 60 * 60 * 1000,
-    before_1_day: 1 * 24 * 60 * 60 * 1000,
-    before_5_hours: 5 * 60 * 60 * 1000,
+    // before_2_days: 2 * 24 * 60 * 60 * 1000,
+    // before_1_day: 1 * 24 * 60 * 60 * 1000,
+    // before_5_hours: 5 * 60 * 60 * 1000,
     before_1_hour: 1 * 60 * 60 * 1000,
 };
 
 const REMINDER_TYPES: ReminderType[] = [
-    "before_2_days",
-    "before_1_day",
-    "before_5_hours",
+    // "before_2_days",
+    // "before_1_day",
+    // "before_5_hours",
     "before_1_hour",
 ];
 
 const EVENT_TYPE_TO_NOTIFICATION: Record<ReminderType, string> = {
-    before_2_days: "calendar_reminder_2_days",
-    before_1_day: "calendar_reminder_1_day",
-    before_5_hours: "calendar_reminder_5_hours",
+    // before_2_days: "calendar_reminder_2_days",
+    // before_1_day: "calendar_reminder_1_day",
+    // before_5_hours: "calendar_reminder_5_hours",
     before_1_hour: "calendar_reminder_1_hour",
 };
 
 function fmtTitle(rt: ReminderType): string {
     switch (rt) {
-        case "before_2_days": return "Upcoming Schedule Reminder";
-        case "before_1_day": return "Schedule Reminder";
-        case "before_5_hours": return "Schedule Starts Soon";
+        // case "before_2_days": return "Upcoming Schedule Reminder";
+        // case "before_1_day": return "Schedule Reminder";
+        // case "before_5_hours": return "Schedule Starts Soon";
         case "before_1_hour": return "Schedule Starts in 1 Hour";
     }
 }
 
 function fmtBody(rt: ReminderType, title: string): string {
     switch (rt) {
-        case "before_2_days": return `Your scheduled upload "${title}" is planned in 2 days.`;
-        case "before_1_day": return `Your scheduled upload "${title}" is planned tomorrow.`;
-        case "before_5_hours": return `Your scheduled upload "${title}" starts in 5 hours.`;
+        // case "before_2_days": return `Your scheduled upload "${title}" is planned in 2 days.`;
+        // case "before_1_day": return `Your scheduled upload "${title}" is planned tomorrow.`;
+        // case "before_5_hours": return `Your scheduled upload "${title}" starts in 5 hours.`;
         case "before_1_hour": return `Your scheduled upload "${title}" starts in 1 hour.`;
     }
 }
