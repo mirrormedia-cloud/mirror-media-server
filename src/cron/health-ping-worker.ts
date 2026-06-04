@@ -11,7 +11,7 @@ import { register, run } from "./registry";
 
 const CRON_ID = "health-ping";
 const TICK_INTERVAL_MS = 60 * 1_000;
-const HEALTH_URL = "https://mirror-media-server.onrender.com/health";
+const HEALTH_URL = "https://api.mirrormedia.space/health";
 
 let _interval: NodeJS.Timeout | null = null;
 
