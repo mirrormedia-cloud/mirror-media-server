@@ -24,6 +24,9 @@ const PreviewBaseDto = z.object({
     weekdays: z.array(z.coerce.number().int().min(0).max(6)).optional().default([]),
     month_days: z.array(z.coerce.number().int().min(1).max(31)).optional().default([]),
     color: z.string().max(50).optional().nullable(),
+    /** Minutes east of UTC from the client device (e.g. IST = 330, PST = -480).
+     *  Sent as `-(new Date().getTimezoneOffset())` from JS clients. */
+    utc_offset_minutes: z.coerce.number().int().min(-840).max(840).optional().default(0),
     title_prefix: z.string().max(255).optional().nullable(),
     description: z.string().optional().nullable(),
     tags: z.array(z.string()).optional().default([]),

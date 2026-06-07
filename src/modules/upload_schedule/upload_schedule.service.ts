@@ -193,6 +193,7 @@ export async function preview_schedule(req: FastifyRequest) {
         end_date: body.end_date ?? null,
         weekdays: body.weekdays,
         month_days: body.month_days,
+        utc_offset_minutes: body.utc_offset_minutes ?? 0,
     });
 
     const items = result.items.map(s => ({
@@ -249,6 +250,7 @@ export async function create_schedule(req: FastifyRequest) {
             end_date: body.end_date ?? null,
             weekdays: body.weekdays,
             month_days: body.month_days,
+            utc_offset_minutes: body.utc_offset_minutes ?? 0,
         });
         generated_items = gen.items;
         warnings = gen.warnings;
@@ -306,13 +308,25 @@ export async function create_schedule(req: FastifyRequest) {
         // `library_item_ids` (the frontend's drag-and-drop arranges this
         // array, so position 1 is whichever file is at the top).
         const total_count = body.library_item_ids.length;
-        const expand_tokens = (s: string, position_1based: number) => s
-            .replace(/\$\{number\}/g, String(position_1based))
-            .replace(/\$\{index\}/g, String(position_1based - 1))
-            .replace(/\$\{count\}/g, String(total_count))
-            .replace(/\{number\}/g, String(position_1based))
-            .replace(/\{index\}/g, String(position_1based - 1))
-            .replace(/\{count\}/g, String(total_count));
+        const expand_tokens = (s: string, position_1based: number): string => {
+            const vars: Record<string, number> = {
+                number: position_1based,
+                index:  position_1based - 1,
+                count:  total_count,
+            };
+            const eval_expr = (expr: string): string => {
+                const substituted = expr.replace(/\b(number|index|count)\b/g, (_, v) => String(vars[v]));
+                if (!/^[\d\s+\-*/().]+$/.test(substituted)) return `{${expr}}`;
+                try {
+                    // eslint-disable-next-line no-new-func
+                    const result = Function(`"use strict"; return (${substituted})`)();
+                    return String(typeof result === 'number' ? Math.floor(result) : result);
+                } catch { return `{${expr}}`; }
+            };
+            return s
+                .replace(/\$\{([^}]+)\}/g, (_, expr) => eval_expr(expr.trim()))
+                .replace(/\{([^}]+)\}/g,   (_, expr) => eval_expr(expr.trim()));
+        };
         const expand_in_array = (arr: string[] | undefined, pos: number): string[] | undefined =>
             arr ? arr.map(v => expand_tokens(v, pos)) : arr;
 
@@ -462,6 +476,7 @@ export async function update_schedule(req: FastifyRequest) {
             end_date: body.end_date ?? null,
             weekdays: body.weekdays,
             month_days: body.month_days,
+            utc_offset_minutes: body.utc_offset_minutes ?? 0,
         });
         generated_items = gen.items;
         warnings = gen.warnings;
@@ -534,13 +549,25 @@ export async function update_schedule(req: FastifyRequest) {
         // `library_item_ids` (the frontend's drag-and-drop arranges this
         // array, so position 1 is whichever file is at the top).
         const total_count = body.library_item_ids.length;
-        const expand_tokens = (s: string, position_1based: number) => s
-            .replace(/\$\{number\}/g, String(position_1based))
-            .replace(/\$\{index\}/g, String(position_1based - 1))
-            .replace(/\$\{count\}/g, String(total_count))
-            .replace(/\{number\}/g, String(position_1based))
-            .replace(/\{index\}/g, String(position_1based - 1))
-            .replace(/\{count\}/g, String(total_count));
+        const expand_tokens = (s: string, position_1based: number): string => {
+            const vars: Record<string, number> = {
+                number: position_1based,
+                index:  position_1based - 1,
+                count:  total_count,
+            };
+            const eval_expr = (expr: string): string => {
+                const substituted = expr.replace(/\b(number|index|count)\b/g, (_, v) => String(vars[v]));
+                if (!/^[\d\s+\-*/().]+$/.test(substituted)) return `{${expr}}`;
+                try {
+                    // eslint-disable-next-line no-new-func
+                    const result = Function(`"use strict"; return (${substituted})`)();
+                    return String(typeof result === 'number' ? Math.floor(result) : result);
+                } catch { return `{${expr}}`; }
+            };
+            return s
+                .replace(/\$\{([^}]+)\}/g, (_, expr) => eval_expr(expr.trim()))
+                .replace(/\{([^}]+)\}/g,   (_, expr) => eval_expr(expr.trim()));
+        };
         const expand_in_array = (arr: string[] | undefined, pos: number): string[] | undefined =>
             arr ? arr.map(v => expand_tokens(v, pos)) : arr;
 

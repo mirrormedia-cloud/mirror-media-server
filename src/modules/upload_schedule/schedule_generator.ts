@@ -19,7 +19,7 @@ export interface GenerateScheduleArgs {
     frequency: Frequency;
     /** How many uploads to fit per scheduled day. Slot count per day is min(release_count, upload_times.length). */
     release_count: number;
-    /** ["10:00", "18:00"] — HH:MM */
+    /** ["10:00", "18:00"] — HH:MM in the user's local timezone. */
     upload_times: string[];
     /** YYYY-MM-DD */
     start_date: string;
@@ -29,6 +29,9 @@ export interface GenerateScheduleArgs {
     weekdays?: number[];
     /** [1..31]. Required for every_month. */
     month_days?: number[];
+    /** Minutes east of UTC (e.g. IST = +330, PST = -480). Used to convert
+     *  the user's local HH:MM to a UTC timestamp. Defaults to 0 (UTC). */
+    utc_offset_minutes?: number;
 }
 
 export interface GenerateScheduleResult {
@@ -60,13 +63,15 @@ function add_days(d: Date, days: number): Date {
     return next;
 }
 
-function combine(date: Date, time_hhmm: string): string {
+function combine(date: Date, time_hhmm: string, utc_offset_minutes: number): string {
     const parts = time_hhmm.split(":").map(Number);
     const hh = parts[0] ?? 0;
     const mm = parts[1] ?? 0;
-    // Use Date.UTC so the stored time is exactly the HH:MM the caller passed,
-    // independent of the server's local timezone.
-    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hh, mm, 0, 0)).toISOString();
+    // Build the user's local wall-clock moment as if it were UTC, then subtract
+    // the UTC offset to get the true UTC instant.
+    // e.g. user in IST (+330) enters 15:12 → stored as 09:42 UTC.
+    const local_ms = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hh, mm, 0, 0);
+    return new Date(local_ms - utc_offset_minutes * 60 * 1000).toISOString();
 }
 
 /**
@@ -117,6 +122,7 @@ export function generate_upload_schedule(args: GenerateScheduleArgs): GenerateSc
     const items: GeneratedSlot[] = [];
     let item_idx = 0;
 
+    const offset = args.utc_offset_minutes ?? 0;
     for (const date of iterate_dates(args, days_needed)) {
         for (let s = 0; s < slots_per_day && item_idx < total_files; s += 1) {
             const lib = args.library_items[item_idx];
@@ -125,7 +131,7 @@ export function generate_upload_schedule(args: GenerateScheduleArgs): GenerateSc
             items.push({
                 library_item_id: lib.library_item_id,
                 title: lib.title,
-                scheduledAt: combine(date, time),
+                scheduledAt: combine(date, time, offset),
             });
             item_idx += 1;
         }
