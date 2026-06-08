@@ -298,10 +298,12 @@ export async function create_upload(req: FastifyRequest) {
         const m = body.manual_details ?? {};
 
         // Per-field manual: per_platform → top-level manual_details → body
+        // Use || not ?? so empty strings fall through to the next source
+        // (an empty p_over.title must not shadow a real manual_details.title).
         const manual = {
-            title: (p_over.title ?? m.title ?? body.title ?? "").toString(),
-            description: (p_over.description ?? m.description ?? body.description ?? "").toString(),
-            caption: (p_over.caption ?? m.caption ?? "").toString(),
+            title: (p_over.title || m.title || body.title || "").toString(),
+            description: (p_over.description || m.description || body.description || "").toString(),
+            caption: (p_over.caption || m.caption || "").toString(),
             tags: (p_over.tags && p_over.tags.length > 0) ? p_over.tags
                 : (m.tags && m.tags.length > 0) ? m.tags
                     : (body.tags ?? []),
