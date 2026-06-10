@@ -175,7 +175,11 @@ export function build_platform_upload_details(opts: {
     const fb = a.facebook ?? {};
 
     if (opts.platform === "youtube") {
-        const title       = merge_text(m.title,       ai ? yt.title : "");
+        // For YouTube, caption is not a native field — fall back to caption
+        // so users who type a caption (IG/FB style) still get a meaningful
+        // video title without having to fill a separate title field.
+        const effective_title = m.caption || m.title || "";
+        const title       = merge_text(effective_title, ai ? yt.title : "");
         const description = merge_text(m.description, ai ? yt.description : "");
         const tags        = merge_array(m.tags,       ai ? yt.tags : []);
         const keywords    = merge_array(m.keywords,   ai ? yt.keywords : []);
