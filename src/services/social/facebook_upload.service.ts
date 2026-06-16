@@ -232,13 +232,31 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
     }
     dlog("start_phase_ok", { video_id, upload_url });
 
-    // Step 2 — transfer video. Pass the public R2 URL; FB fetches it directly.
+    // Step 2 — transfer video. FB's resumable-upload protocol requires the
+    // `offset` (always 0 for a fresh upload) and `file_size` headers even
+    // when using URL-based ingestion. Missing or non-numeric `offset`
+    // triggers: "HeaderValuePredicate: Header Offset not convertable to unsigned long".
+    let file_size = 0;
+    try {
+        const headRes = await axios.head(input.file_url, { timeout: 10_000 });
+        const raw_len = headRes.headers["content-length"];
+        const parsed = Number(raw_len);
+        if (Number.isFinite(parsed) && parsed > 0) file_size = parsed;
+    } catch {
+        // HEAD failed — proceed with file_size 0; FB will infer from the URL content.
+    }
+    dlog("file_size_probe", { video_id, file_size });
+
     try {
         await axios.post(
             upload_url,
             null,
             {
-                headers: { Authorization: `OAuth ${access_token}` },
+                headers: {
+                    Authorization: `OAuth ${access_token}`,
+                    offset: "0",
+                    file_size: String(file_size),
+                },
                 params: { file_url: input.file_url },
                 maxBodyLength: Infinity,
                 maxContentLength: Infinity,
@@ -248,7 +266,7 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
         dlog("transfer_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
         throw err;
     }
-    dlog("transfer_phase_ok", { video_id });
+    dlog("transfer_phase_ok", { video_id, file_size });
 
     // Step 3 — finish / publish. Reels posted to a Page are always public.
     const video_state = scheduled ? "SCHEDULED" : "PUBLISHED";
