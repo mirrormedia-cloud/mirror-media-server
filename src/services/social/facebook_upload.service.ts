@@ -13,9 +13,7 @@
  */
 
 import axios from "axios";
-import FormData from "form-data";
 import { SocialAccount } from "../../db/models";
-import { get_url_stream } from "./url_stream";
 
 const GRAPH_VERSION = "v18.0";
 const GRAPH_URL = process.env.GRAPH_URL || `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -175,88 +173,117 @@ function dlog(step: string, data?: Record<string, any>) {
 //     };
 // }
 
-export async function upload_video_to_facebook(input: FacebookUploadInput) {
+export async function upload_video_to_facebook(input: FacebookUploadInput): Promise<FacebookUploadResult> {
     const { account } = input;
 
+    if (account.platform !== "facebook") {
+        throw new Error(`SocialAccount ${account.id} is not a Facebook account (platform=${account.platform})`);
+    }
     if (!account.page_id || !account.access_token) {
-        throw new Error("Missing page_id or access_token");
+        throw new Error(`Facebook account ${account.id} is missing page_id or access_token — reconnect required`);
+    }
+    if (!input.file_url) {
+        throw new Error("Facebook Reels upload requires file_url — library row has no R2 URL");
     }
 
-    // Step 1 - Create reel upload session
-    const startRes = await axios.post(
-        `${GRAPH_URL}/${account.page_id}/video_reels`,
-        null,
-        {
-            params: {
-                upload_phase: "start",
-                access_token: account.access_token,
-            },
-        }
-    );
+    // Narrowed locals — TypeScript won't narrow class properties through the guard above.
+    const page_id = account.page_id;
+    const access_token = account.access_token;
 
-    const {
-        video_id,
-        upload_url,
-    } = startRes.data;
-
-    if (!video_id || !upload_url) {
-        throw new Error("Failed to create reel upload session");
-    }
-
-    // Step 2 - Upload video from public URL
-    await axios.post(
-        upload_url,
-        null,
-        {
-            headers: {
-                Authorization: `OAuth ${account.access_token}`,
-            },
-            params: {
-                file_url: input.file_url,
-            },
-            maxBodyLength: Infinity,
-        }
-    );
-
-    // Optional schedule
-    let video_state = "PUBLISHED";
-    let scheduled_publish_time: number | undefined;
-
+    // Validate / clamp the schedule window.
+    // FB requires: now + 10 min ≤ scheduled_publish_time ≤ now + 6 months.
+    let scheduled_publish_time: number | null = null;
+    let scheduled = false;
     if (input.publish_at) {
-        video_state = "SCHEDULED";
-        scheduled_publish_time = Math.floor(
-            new Date(input.publish_at).getTime() / 1000
-        );
+        const target = new Date(input.publish_at).getTime();
+        const now = Date.now();
+        const min_ahead_ms = 10 * 60 * 1000;
+        const max_ahead_ms = 6 * 30 * 24 * 60 * 60 * 1000;
+        if (Number.isFinite(target) && target - now >= min_ahead_ms && target - now <= max_ahead_ms) {
+            scheduled_publish_time = Math.floor(target / 1000);
+            scheduled = true;
+        } else {
+            dlog("schedule_window_invalid", {
+                requested: input.publish_at,
+                must_be_between: "10 minutes and 6 months from now",
+            });
+        }
     }
 
-    // Step 3 - Publish Reel
-    const finishPayload: any = {
+    dlog("upload_started", { account_id: account.id, page_id, scheduled, scheduled_publish_time });
+
+    // Step 1 — create Reels upload session.
+    let video_id: string;
+    let upload_url: string;
+    try {
+        const startRes = await axios.post(
+            `${GRAPH_URL}/${page_id}/video_reels`,
+            null,
+            { params: { upload_phase: "start", access_token } },
+        );
+        video_id = startRes.data?.video_id;
+        upload_url = startRes.data?.upload_url;
+    } catch (err: any) {
+        dlog("start_phase_failed", { account_id: account.id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
+        throw err;
+    }
+    if (!video_id || !upload_url) {
+        throw new Error("Facebook Reels: start phase returned no video_id or upload_url");
+    }
+    dlog("start_phase_ok", { video_id, upload_url });
+
+    // Step 2 — transfer video. Pass the public R2 URL; FB fetches it directly.
+    try {
+        await axios.post(
+            upload_url,
+            null,
+            {
+                headers: { Authorization: `OAuth ${access_token}` },
+                params: { file_url: input.file_url },
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity,
+            },
+        );
+    } catch (err: any) {
+        dlog("transfer_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
+        throw err;
+    }
+    dlog("transfer_phase_ok", { video_id });
+
+    // Step 3 — finish / publish. Reels posted to a Page are always public.
+    const video_state = scheduled ? "SCHEDULED" : "PUBLISHED";
+    const finishPayload: Record<string, any> = {
         upload_phase: "finish",
         video_id,
         video_state,
-        description: input.description || "",
-        title: input.title || "",
-        access_token: account.access_token,
+        description: input.description ?? "",
+        access_token,
     };
-
-    if (scheduled_publish_time) {
-        finishPayload.scheduled_publish_time =
-            scheduled_publish_time;
+    if (input.title) finishPayload.title = input.title.slice(0, 255);
+    if (scheduled && scheduled_publish_time != null) {
+        finishPayload.scheduled_publish_time = scheduled_publish_time;
     }
 
-    const publishRes = await axios.post(
-        `${GRAPH_URL}/${account.page_id}/video_reels`,
-        null,
-        {
-            params: finishPayload,
-        }
-    );
+    let publishRes;
+    try {
+        publishRes = await axios.post(
+            `${GRAPH_URL}/${page_id}/video_reels`,
+            null,
+            { params: finishPayload },
+        );
+    } catch (err: any) {
+        dlog("finish_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
+        throw err;
+    }
+    dlog("finish_phase_ok", { account_id: account.id, video_id, scheduled });
 
     return {
-         file_id: input.file_url,
+        file_id: input.file_url,
         video_id,
-        scheduled: video_state === "SCHEDULED",
-        publish_at: scheduled_publish_time ? new Date(scheduled_publish_time! * 1000).toISOString() : null,
+        scheduled,
+        publish_at: scheduled && scheduled_publish_time != null
+            ? new Date(scheduled_publish_time * 1000).toISOString()
+            : null,
         raw: publishRes.data,
     };
 }
