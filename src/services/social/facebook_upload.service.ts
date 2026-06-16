@@ -263,31 +263,38 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
     dlog("transfer_phase_ok", { video_id, file_size });
 
     // Step 3 — finish / publish. Reels posted to a Page are always public.
+    // `published: "true"` is required alongside `video_state: "PUBLISHED"` —
+    // without it FB saves the reel as a draft (invisible to other accounts).
     const video_state = scheduled ? "SCHEDULED" : "PUBLISHED";
     const finishPayload: Record<string, any> = {
         upload_phase: "finish",
         video_id,
         video_state,
+        published: scheduled ? "false" : "true",
         description: input.description ?? "",
         access_token,
     };
     if (input.title) finishPayload.title = input.title.slice(0, 255);
     if (scheduled && scheduled_publish_time != null) {
-        finishPayload.scheduled_publish_time = scheduled_publish_time;
+        finishPayload.scheduled_publish_time = String(scheduled_publish_time);
     }
 
     let publishRes;
     try {
+        // Send as body params (not query string) — Graph API honours both but
+        // body is more reliable for larger payloads like descriptions.
         publishRes = await axios.post(
             `${GRAPH_URL}/${page_id}/video_reels`,
-            null,
-            { params: finishPayload },
+            new URLSearchParams(finishPayload).toString(),
+            {
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            },
         );
     } catch (err: any) {
         dlog("finish_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
         throw err;
     }
-    dlog("finish_phase_ok", { account_id: account.id, video_id, scheduled });
+    dlog("finish_phase_ok", { account_id: account.id, video_id, scheduled, published: finishPayload.published });
 
     return {
         file_id: input.file_url,
