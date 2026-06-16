@@ -14,7 +14,6 @@
 
 import axios from "axios";
 import { SocialAccount } from "../../db/models";
-import { get_url_stream } from "./url_stream";
 
 const GRAPH_VERSION = "v18.0";
 const GRAPH_URL = process.env.GRAPH_URL || `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -219,8 +218,8 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
     try {
         const startRes = await axios.post(
             `${GRAPH_URL}/${page_id}/video_reels`,
-            null,
-            { params: { upload_phase: "start", access_token } },
+            { upload_phase: "start", access_token },
+            { headers: { "Content-Type": "application/json" } },
         );
         video_id = startRes.data?.video_id;
         upload_url = startRes.data?.upload_url;
@@ -233,68 +232,47 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
     }
     dlog("start_phase_ok", { video_id, upload_url });
 
-    // Step 2 — transfer video bytes to the resumable upload URL.
-    // FB's protocol requires: Authorization header, offset: 0, file_size: {bytes},
-    // and the raw video stream as the POST body with matching Content-Length.
-    // Using file_url as a query param causes "Content-Length has invalid value"
-    // because axios injects Content-Length: 0 for a null body.
-    const { stream, file_size } = await get_url_stream(input.file_url);
-    dlog("url_stream_open", { video_id, file_size });
-
-    const transfer_headers: Record<string, string> = {
-        Authorization: `OAuth ${access_token}`,
-        offset: "0",
-        file_size: String(file_size ?? 0),
-    };
-    if (file_size != null && file_size > 0) {
-        transfer_headers["Content-Length"] = String(file_size);
-    }
-
+    // Step 2 — upload hosted file. upload_url is on rupload.facebook.com.
+    // For CDN-hosted files, pass file_url as a header (not a query param or body).
     try {
-        await axios.post(upload_url, stream, {
-            headers: transfer_headers,
-            maxBodyLength: Infinity,
-            maxContentLength: Infinity,
+        await axios.post(upload_url, null, {
+            headers: {
+                Authorization: `OAuth ${access_token}`,
+                file_url: input.file_url,
+            },
         });
     } catch (err: any) {
         dlog("transfer_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
         throw err;
     }
-    dlog("transfer_phase_ok", { video_id, file_size });
+    dlog("transfer_phase_ok", { video_id });
 
-    // Step 3 — finish / publish. Reels posted to a Page are always public.
-    // `published: "true"` is required alongside `video_state: "PUBLISHED"` —
-    // without it FB saves the reel as a draft (invisible to other accounts).
+    // Step 3 — publish the Reel. video_state=PUBLISHED makes it immediately public.
     const video_state = scheduled ? "SCHEDULED" : "PUBLISHED";
-    const finishPayload: Record<string, any> = {
-        upload_phase: "finish",
-        video_id,
-        video_state,
-        published: scheduled ? "false" : "true",
-        description: input.description ?? "",
+    const finish_params: Record<string, string> = {
         access_token,
+        video_id,
+        upload_phase: "finish",
+        video_state,
+        description: input.description ?? "",
     };
-    if (input.title) finishPayload.title = input.title.slice(0, 255);
+    if (input.title) finish_params.title = input.title.slice(0, 255);
     if (scheduled && scheduled_publish_time != null) {
-        finishPayload.scheduled_publish_time = String(scheduled_publish_time);
+        finish_params.scheduled_publish_time = String(scheduled_publish_time);
     }
 
     let publishRes;
     try {
-        // Send as body params (not query string) — Graph API honours both but
-        // body is more reliable for larger payloads like descriptions.
         publishRes = await axios.post(
             `${GRAPH_URL}/${page_id}/video_reels`,
-            new URLSearchParams(finishPayload).toString(),
-            {
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            },
+            null,
+            { params: finish_params },
         );
     } catch (err: any) {
         dlog("finish_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
         throw err;
     }
-    dlog("finish_phase_ok", { account_id: account.id, video_id, scheduled, published: finishPayload.published });
+    dlog("finish_phase_ok", { account_id: account.id, video_id, scheduled });
 
     return {
         file_id: input.file_url,
