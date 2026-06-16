@@ -14,6 +14,7 @@
 
 import axios from "axios";
 import { SocialAccount } from "../../db/models";
+import { get_url_stream } from "./url_stream";
 
 const GRAPH_VERSION = "v18.0";
 const GRAPH_URL = process.env.GRAPH_URL || `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -232,36 +233,29 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
     }
     dlog("start_phase_ok", { video_id, upload_url });
 
-    // Step 2 — transfer video. FB's resumable-upload protocol requires the
-    // `offset` (always 0 for a fresh upload) and `file_size` headers even
-    // when using URL-based ingestion. Missing or non-numeric `offset`
-    // triggers: "HeaderValuePredicate: Header Offset not convertable to unsigned long".
-    let file_size = 0;
-    try {
-        const headRes = await axios.head(input.file_url, { timeout: 10_000 });
-        const raw_len = headRes.headers["content-length"];
-        const parsed = Number(raw_len);
-        if (Number.isFinite(parsed) && parsed > 0) file_size = parsed;
-    } catch {
-        // HEAD failed — proceed with file_size 0; FB will infer from the URL content.
+    // Step 2 — transfer video bytes to the resumable upload URL.
+    // FB's protocol requires: Authorization header, offset: 0, file_size: {bytes},
+    // and the raw video stream as the POST body with matching Content-Length.
+    // Using file_url as a query param causes "Content-Length has invalid value"
+    // because axios injects Content-Length: 0 for a null body.
+    const { stream, file_size } = await get_url_stream(input.file_url);
+    dlog("url_stream_open", { video_id, file_size });
+
+    const transfer_headers: Record<string, string> = {
+        Authorization: `OAuth ${access_token}`,
+        offset: "0",
+        file_size: String(file_size ?? 0),
+    };
+    if (file_size != null && file_size > 0) {
+        transfer_headers["Content-Length"] = String(file_size);
     }
-    dlog("file_size_probe", { video_id, file_size });
 
     try {
-        await axios.post(
-            upload_url,
-            null,
-            {
-                headers: {
-                    Authorization: `OAuth ${access_token}`,
-                    offset: "0",
-                    file_size: String(file_size),
-                },
-                params: { file_url: input.file_url },
-                maxBodyLength: Infinity,
-                maxContentLength: Infinity,
-            },
-        );
+        await axios.post(upload_url, stream, {
+            headers: transfer_headers,
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
+        });
     } catch (err: any) {
         dlog("transfer_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
         throw err;
