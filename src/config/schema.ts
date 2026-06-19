@@ -64,6 +64,12 @@ export const ConfigSchema = z.object({
     /** Graph API version used in the messages URL. Bump when Meta deprecates. */
     api_version: z.string().default("v25.0"),
   }).default({}),
+
+  instagram: z.object({
+    /** Webhook verify token. Set this in Meta App Dashboard →
+     *  Instagram → Webhooks → Verify token. */
+    verify_token: z.string().default(""),
+  }).default({}),
 });
 
 export type AppEnv = z.infer<typeof AppEnvSchema>;

@@ -38,6 +38,8 @@ import { analyticsRoutes } from "./modules/analytics/analytics.routes";
 import { dashboardRoutes } from "./modules/dashboard/dashboard.routes";
 import { notificationRoutes, notificationPublicRoutes } from "./modules/notifications/routes";
 import { cronsRoutes } from "./modules/crons/crons.routes";
+import { instagramWebhookPublicRoutes, instagramWebhookRoutes } from "./modules/instagram_webhook/routes";
+import { automationRoutes } from "./modules/automation/automation.routes";
 
 // auth middleware (used to wrap every /api/ott/* route below)
 import { authenticate } from "./shared/security/auth.middleware";
@@ -158,6 +160,9 @@ export async function buildApp() {
   // Public — dev/test broadcast endpoint. NO auth. Anyone with the URL can
   // fire a push to every active user. Keep restricted to dev environments.
   app.register(notificationPublicRoutes, { prefix: "/api/notifications" });
+  // Public — Instagram webhook (Meta verification handshake + comment/DM events).
+  // Meta hits these directly, no JWT possible.
+  app.register(instagramWebhookPublicRoutes, { prefix: "/api/instagram" });
   // Public — WhatsApp Cloud API webhook (verification handshake +
   // ongoing message callbacks). Meta hits these directly so they MUST
   // live outside the JWT scope.
@@ -204,6 +209,10 @@ export async function buildApp() {
     await protectedApp.register(notificationRoutes,    { prefix: "/api/notifications" });
     // System cron registry — list status, trigger immediate runs.
     await protectedApp.register(cronsRoutes,           { prefix: "/api/crons" });
+    // Instagram bot config management (buttons, reply text per IG account).
+    await protectedApp.register(instagramWebhookRoutes, { prefix: "/api/instagram" });
+    // Keyword-based comment automation rules (ManyChat-style).
+    await protectedApp.register(automationRoutes, { prefix: "/api/automation" });
   });
 
   return app;

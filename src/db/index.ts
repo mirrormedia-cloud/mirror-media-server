@@ -8,6 +8,8 @@ import {
   CalendarEvent, UploadScheduleBatch, UploadScheduleItem,
   SocialAccount, SocialUpload, MediaAnalysisResult,
   NotificationHistory, CalendarEventReminder, UserNotificationSettings,
+  InstagramBotConfig,
+  AutomationRule,
 } from "./models";
 
 export const sequelize = new Sequelize({
@@ -48,6 +50,8 @@ export const sequelize = new Sequelize({
     NotificationHistory,
     CalendarEventReminder,
     UserNotificationSettings,
+    InstagramBotConfig,
+    AutomationRule,
   ],
 });
 
@@ -57,7 +61,8 @@ export async function initDb() {
   try {
     await sequelize.authenticate();
     console.log("✅ Database connected successfully");
-    await sequelize.sync({ alter: true });
+    // Sync only new tables (createOnly = no alter on existing tables)
+    await sequelize.sync({ alter: false, force: false });
     console.log("✅ Database synced successfully");
     await ensureDefaultUserAndBackfill();
   } catch (err: any) {

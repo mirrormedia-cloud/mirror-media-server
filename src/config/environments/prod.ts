@@ -57,6 +57,10 @@ const prodConfig = {
     verify_token: process.env.WHATSAPP_VERIFY_TOKEN ?? "",
     api_version: process.env.WHATSAPP_API_VERSION ?? "v25.0",
   },
+
+  instagram: {
+    verify_token: process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN ?? "",
+  },
   // Firebase Admin creds are loaded from `backend/firebase-service-account.json`.
 };
 

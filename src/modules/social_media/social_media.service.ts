@@ -15,7 +15,7 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 import { google } from "googleapis";
 import axios from "axios";
 import { Op } from "sequelize";
-import { SocialAccount } from "../../db/models";
+import { SocialAccount, InstagramBotConfig } from "../../db/models";
 import { success, error } from "../../shared/http/response";
 import { HttpStatus } from "../../shared/http/status";
 import type { SupportedPlatform } from "./social_media.dto";
@@ -192,6 +192,8 @@ const FACEBOOK_SCOPES = [
     "pages_manage_metadata",
     "instagram_basic",
     "instagram_content_publish",
+    "instagram_manage_comments",
+    "instagram_manage_messages",
     "business_management",
 ];
 
@@ -371,6 +373,18 @@ export async function facebook_callback(req: FastifyRequest, reply: FastifyReply
             } else {
                 const created = await SocialAccount.create(ig_payload as any);
                 slog("ig_account_created", { user_id, account_id: created.id });
+            }
+
+            // Auto-create a default bot config when account is connected (idempotent).
+            const existing_config = await InstagramBotConfig.findOne({ where: { ig_account_id: ig_id } });
+            if (!existing_config) {
+                await InstagramBotConfig.create({
+                    ig_account_id: ig_id,
+                    reply_text: "Thank you for commenting! 🙏",
+                    buttons: [],
+                    is_active: true,
+                } as any);
+                slog("ig_bot_config_created", { ig_account_id: ig_id });
             }
         }
 

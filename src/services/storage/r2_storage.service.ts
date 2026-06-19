@@ -57,17 +57,29 @@ export function create_r2_client(): S3Client {
             "R2 is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME in .env.",
         );
     }
+    // R2_ENDPOINT in .env often includes the bucket as a path segment
+    // (e.g. https://<account>.r2.cloudflarestorage.com/my-bucket).
+    // With forcePathStyle:false the SDK would also move the bucket to a
+    // subdomain, resulting in it appearing twice and every presigned URL
+    // pointing at a non-existent key. Strip the trailing bucket segment
+    // so the base endpoint is purely the account root, then force
+    // path-style so the SDK keeps the bucket in the URL path — once.
+    const raw_endpoint = (config.r2.endpoint || "").replace(/\/+$/, "");
+    const bucket_suffix = `/${config.r2.bucket_name}`;
+    const clean_endpoint = raw_endpoint.endsWith(bucket_suffix)
+        ? raw_endpoint.slice(0, -bucket_suffix.length)
+        : raw_endpoint;
+
     _client = new S3Client({
         region: config.r2.region || "auto",
-        endpoint: config.r2.endpoint,
+        endpoint: clean_endpoint,
         credentials: {
             accessKeyId: config.r2.access_key_id,
             secretAccessKey: config.r2.secret_access_key,
         },
-        // R2 supports both styles; virtual-host is the default in v3.
-        forcePathStyle: false,
+        forcePathStyle: true,
     });
-    rlog("client initialized", { endpoint: config.r2.endpoint, bucket: config.r2.bucket_name });
+    rlog("client initialized", { endpoint: clean_endpoint, bucket: config.r2.bucket_name });
     return _client;
 }
 

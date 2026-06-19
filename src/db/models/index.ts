@@ -28,3 +28,7 @@ export { MediaAnalysisResult } from "./social/media_analysis_result";
 export { NotificationHistory } from "./notification/notification_history";
 export { CalendarEventReminder } from "./notification/calendar_event_reminder";
 export { UserNotificationSettings } from "./notification/user_notification_settings";
+
+export { InstagramBotConfig } from "./instagram/instagram_bot_config";
+
+export { AutomationRule } from "./automation/automation_rule";
