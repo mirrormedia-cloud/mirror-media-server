@@ -14,7 +14,6 @@
 
 import axios from "axios";
 import { SocialAccount } from "../../db/models";
-import { get_url_stream } from "./url_stream";
 
 const GRAPH_VERSION = "v18.0";
 const GRAPH_URL = process.env.GRAPH_URL || `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -233,25 +232,14 @@ export async function upload_video_to_facebook(input: FacebookUploadInput): Prom
     }
     dlog("start_phase_ok", { video_id, upload_url });
 
-    // Step 2 — upload the raw video bytes to Facebook's rupload endpoint.
-    // Streaming bytes directly (not file_url server-side fetch) preserves
-    // the original quality — Facebook's server-side fetch can apply extra
-    // compression or use a lower-quality ingestion pipeline.
-    const { stream, file_size } = await get_url_stream(input.file_url);
-    dlog("transfer_phase_start", { video_id, file_size });
+    // Step 2 — upload hosted file. upload_url is on rupload.facebook.com.
+    // For CDN-hosted files, pass file_url as a header (not a query param or body).
     try {
-        const transfer_headers: Record<string, string> = {
-            Authorization: `OAuth ${access_token}`,
-            offset: "0",
-            "Content-Type": "application/octet-stream",
-        };
-        if (file_size != null && file_size > 0) {
-            transfer_headers.file_size = String(file_size);
-        }
-        await axios.post(upload_url, stream, {
-            headers: transfer_headers,
-            maxBodyLength: Infinity,
-            maxContentLength: Infinity,
+        await axios.post(upload_url, null, {
+            headers: {
+                Authorization: `OAuth ${access_token}`,
+                file_url: input.file_url,
+            },
         });
     } catch (err: any) {
         dlog("transfer_phase_failed", { account_id: account.id, video_id, error: err?.message ?? String(err), details: err?.response?.data ?? null });
