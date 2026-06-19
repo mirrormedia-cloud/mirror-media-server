@@ -72,7 +72,7 @@ export async function update_automation_rule(req: FastifyRequest) {
         ...(body.type !== undefined && { type: body.type }),
         ...(body.trigger_keywords !== undefined && { trigger_keywords: body.trigger_keywords }),
         ...(body.comment_reply !== undefined && { comment_reply: body.comment_reply }),
-        ...(body.dm_message !== undefined && { dm_message: body.dm_message }),
+        ...(body.dm_message !== undefined && { dm_message: body.dm_message as any }),
         ...(body.status !== undefined && { status: body.status }),
     });
     return success("Automation rule updated", rule_dto(row));
