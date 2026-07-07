@@ -57,6 +57,8 @@ import { ensureUserFolders } from "../../shared/utils/user-folders";
 import { UPLOAD_BASE } from "../../shared/upload/upload";
 import { ext_from_url, ext_from_content_type, file_size as get_file_size } from "../../utils/library_storage";
 import { convert_to_mp4, FfmpegMissingError, resolve_hls_highest_variant } from "../../utils/ffmpeg";
+import { call_external_ott_api } from "../../utils/ott_proxy";
+import { resolve_request_body } from "../ott_api/ott_api_body.service";
 
 function ts(value: any): string | null {
     if (!value) return null;
@@ -158,6 +160,17 @@ function build_request_headers(ott: OttPlatform): Record<string, string> {
     if (!headers["User-Agent"] && !headers["user-agent"]) {
         headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119";
     }
+    // Many OTT CDNs (CloudFront etc.) validate Referer/Origin and return 403
+    // when they're missing — the site's own player sends them automatically.
+    // Default both to the platform's origin unless the user stored their own.
+    const has = (name: string) => Object.keys(headers).some(k => k.toLowerCase() === name);
+    try {
+        const origin = new URL(String(ott.base_url ?? "")).origin;
+        if (origin) {
+            if (!has("referer")) headers["Referer"] = `${origin}/`;
+            if (!has("origin")) headers["Origin"] = origin;
+        }
+    } catch { /* base_url unparsable — send nothing extra */ }
     if (ott.cookie_string) headers["Cookie"] = ott.cookie_string;
     return headers;
 }
@@ -441,24 +454,95 @@ export async function save_bulk_video_assets_to_library(req: FastifyRequest) {
 
 // ── save_from_cards (existing capture flow) ────────────────────────────
 
+interface LoadedSourceResponse {
+    response: any;
+    root_row: OttApiResponse | null;
+    child_row: OttChildApiItemResponse | null;
+}
+
 async function load_source_response_for_node(args: {
     api_node_id: string;
     source_response_id?: string | null;
-}): Promise<any | null> {
+}): Promise<LoadedSourceResponse | null> {
     if (args.source_response_id) {
         const child = await OttChildApiItemResponse.findByPk(args.source_response_id);
-        if (child) return child.response;
+        if (child) return { response: child.response, root_row: null, child_row: child };
         const root = await OttApiResponse.findByPk(args.source_response_id);
-        if (root) return root.response;
+        if (root) return { response: root.response, root_row: root, child_row: null };
     }
     const root = await OttApiResponse.findOne({ where: { api_node_id: args.api_node_id } as any });
-    if (root) return root.response;
+    if (root) return { response: root.response, root_row: root, child_row: null };
     const child = await OttChildApiItemResponse.findOne({
         where: { child_api_id: args.api_node_id } as any,
         order: [["called_at", "DESC"]],
     });
-    if (child) return child.response;
+    if (child) return { response: child.response, root_row: null, child_row: child };
     return null;
+}
+
+// Signed CDN URLs (CloudFront etc.) captured in a saved response expire;
+// downloads then fail with an upstream 4xx. These errors are recoverable by
+// re-calling the source API for a freshly signed URL.
+const STALE_SOURCE_ERROR_RE = /upstream returned 4xx|Upstream HTTP 4\d\d|HTTP error 4\d\d|Server returned 4\d\d/i;
+
+/**
+ * Re-call the upstream API behind a saved response and persist the fresh
+ * payload over the stale row. Child responses re-use their stored
+ * `resolved_endpoint`; root nodes re-use `node.endpoint` (skipped when it
+ * still contains unresolved `<var>` placeholders). Returns the fresh
+ * response data, or null when the refresh isn't possible / failed.
+ */
+async function refresh_source_response(args: {
+    ott: OttPlatform;
+    node: OttApiNode;
+    loaded: LoadedSourceResponse;
+}): Promise<any | null> {
+    const { ott, node, loaded } = args;
+    try {
+        let parent_response: any = null;
+        if (node.parent_id) {
+            const parent_loaded = await load_source_response_for_node({ api_node_id: node.parent_id });
+            parent_response = parent_loaded?.response ?? null;
+        }
+        const body_res = resolve_request_body({
+            body_mode: node.body_mode as any,
+            request_body_config: node.request_body_config ?? [],
+            raw_body: (node.request_body as Record<string, any> | null) ?? null,
+            parent_response,
+            card_index: loaded.child_row?.card_index ?? 0,
+        });
+        if (body_res.error) return null;
+
+        const resolved_endpoint = loaded.child_row?.resolved_endpoint || node.endpoint || "";
+        if (!resolved_endpoint || /<[^>]+>/.test(resolved_endpoint)) return null;
+
+        const result = await call_external_ott_api({
+            ott,
+            api_node: node,
+            resolved_endpoint,
+            request_body: body_res.body,
+            parent_api_id: node.parent_id ?? null,
+            child_api_id: node.parent_id ? node.id : null,
+        });
+        if (!result.success || result.data === undefined || result.data === null) return null;
+
+        if (loaded.child_row) {
+            await loaded.child_row.update({
+                response: result.data,
+                http_status: result.status,
+                called_at: new Date(),
+            } as any);
+        } else if (loaded.root_row) {
+            await loaded.root_row.update({
+                response: result.data,
+                http_status: result.status,
+            } as any);
+        }
+        return result.data;
+    } catch (err: any) {
+        console.log("[library] source response refresh failed:", err?.message ?? err);
+        return null;
+    }
 }
 
 interface CaptureMapping {
@@ -486,6 +570,7 @@ async function capture_assets_for_card_index(args: {
     const { ott_id, api_node, response, mapping, card_index } = args;
     const list_path = mapping.list_path ?? api_node.list_path ?? "";
     const out: OttVideoAsset[] = [];
+    const seen_urls = new Set<string>();
     const get = (raw_path: string | null | undefined): string | null => {
         if (!raw_path) return null;
         const idx_path = replace_array_index_in_path(raw_path, card_index);
@@ -497,6 +582,8 @@ async function capture_assets_for_card_index(args: {
         const url_path = replace_array_index_in_path(raw_url_path, card_index);
         const url_value = get_value_by_path(response, url_path);
         if (typeof url_value !== "string" || !url_value) continue;
+        if (seen_urls.has(url_value)) continue;
+        seen_urls.add(url_value);
         const existing = await OttVideoAsset.findOne({ where: { ott_id, video_url: url_value } as any });
         if (existing) { out.push(existing); continue; }
         const created = await OttVideoAsset.create({
@@ -542,8 +629,11 @@ export async function save_from_cards(req: FastifyRequest) {
         api_node_id: body.api_node_id,
     };
     if (body.source_response_id) load_args.source_response_id = body.source_response_id;
-    const response = await load_source_response_for_node(load_args);
-    if (!response) return error(HttpStatus.BAD_REQUEST, "No saved response found for this API");
+    const loaded = await load_source_response_for_node(load_args);
+    if (!loaded || loaded.response === undefined || loaded.response === null) {
+        return error(HttpStatus.BAD_REQUEST, "No saved response found for this API");
+    }
+    let response = loaded.response;
 
     const opts: SaveOptions = {
         save_video: body.save_video ?? mapping.save_video ?? true,
@@ -555,26 +645,67 @@ export async function save_from_cards(req: FastifyRequest) {
     const items: OttLibraryItem[] = [];
     const failures: Array<{ card_index: number; error: string }> = [];
     let no_url = 0;
+
+    // Refresh the source response at most once per request, lazily — only
+    // when a download actually fails with a stale-URL 4xx.
+    let refresh_attempted = false;
+    let refreshed_response: any = null;
+    const get_refreshed_response = async (): Promise<any | null> => {
+        if (!refresh_attempted) {
+            refresh_attempted = true;
+            refreshed_response = await refresh_source_response({ ott, node, loaded });
+            if (refreshed_response) response = refreshed_response;
+        }
+        return refreshed_response;
+    };
+
     for (const card_index of body.card_indices) {
         const assets = await capture_assets_for_card_index({
             ott_id, api_node: node, response, mapping, card_index,
         });
         if (assets.length === 0) { no_url += 1; continue; }
         for (const asset of assets) {
+            let item: OttLibraryItem | null = null;
             try {
-                const item = await process_asset_to_r2({ ott, user_id, asset, options: opts });
-                // Backfill folder grouping from request body if provided.
-                if (body.parent_item_key && !item.parent_item_key) {
-                    await item.update({
-                        parent_item_key: body.parent_item_key,
-                        parent_title: body.parent_title ?? null,
-                        parent_api_id: body.parent_api_id ?? null,
-                    } as any);
-                }
-                items.push(item);
+                item = await process_asset_to_r2({ ott, user_id, asset, options: opts });
             } catch (err: any) {
-                failures.push({ card_index, error: err?.message ?? "failed" });
+                const message = err?.message ?? "failed";
+                if (STALE_SOURCE_ERROR_RE.test(message)) {
+                    const fresh = await get_refreshed_response();
+                    if (fresh) {
+                        const fresh_assets = await capture_assets_for_card_index({
+                            ott_id, api_node: node, response: fresh, mapping, card_index,
+                        });
+                        const source_path = (asset.metadata as any)?.source_path ?? null;
+                        const retry_asset = fresh_assets.find(a =>
+                            a.video_url !== asset.video_url
+                            && (a.metadata as any)?.source_path === source_path)
+                            ?? fresh_assets.find(a => a.video_url !== asset.video_url)
+                            ?? null;
+                        if (retry_asset) {
+                            try {
+                                item = await process_asset_to_r2({ ott, user_id, asset: retry_asset, options: opts });
+                            } catch (retry_err: any) {
+                                failures.push({ card_index, error: retry_err?.message ?? "failed" });
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if (!item) {
+                    failures.push({ card_index, error: message });
+                    continue;
+                }
             }
+            // Backfill folder grouping from request body if provided.
+            if (body.parent_item_key && !item.parent_item_key) {
+                await item.update({
+                    parent_item_key: body.parent_item_key,
+                    parent_title: body.parent_title ?? null,
+                    parent_api_id: body.parent_api_id ?? null,
+                } as any);
+            }
+            items.push(item);
         }
     }
     return success("save_from_cards completed", {
