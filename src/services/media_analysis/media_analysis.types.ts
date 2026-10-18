@@ -4,7 +4,7 @@
  * from one place without circular deps.
  */
 
-export type MediaPlatform = "youtube" | "facebook" | "instagram" | "general";
+export type MediaPlatform = "youtube" | "facebook" | "instagram" | "tiktok" | "general";
 
 export interface ManualMediaOverrides {
     title?: string | undefined;

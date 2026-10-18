@@ -12,7 +12,7 @@
 import { Table, Column, Model, DataType, ForeignKey, BelongsTo } from "sequelize-typescript";
 import { User } from "../auth/user";
 
-export type SocialPlatform = "youtube" | "facebook" | "instagram";
+export type SocialPlatform = "youtube" | "facebook" | "instagram" | "tiktok";
 
 @Table({
     tableName: "social_accounts",

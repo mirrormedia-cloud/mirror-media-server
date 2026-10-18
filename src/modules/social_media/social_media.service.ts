@@ -178,7 +178,179 @@ export async function get_connect_url(req: FastifyRequest) {
         return success("Consent URL created", { url, platform });
     }
 
+    if (platform === "tiktok") {
+        if (!process.env.TIKTOK_CLIENT_KEY || !process.env.TIKTOK_CLIENT_SECRET || !process.env.TIKTOK_REDIRECT_URI) {
+            slog("tiktok_oauth_not_configured", {
+                has_client_key: !!process.env.TIKTOK_CLIENT_KEY,
+                has_client_secret: !!process.env.TIKTOK_CLIENT_SECRET,
+                has_redirect: !!process.env.TIKTOK_REDIRECT_URI,
+            });
+            return error(HttpStatus.BAD_REQUEST, "TikTok OAuth not configured. Set TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REDIRECT_URI in .env");
+        }
+        const state = encode_state({ user_id, platform: caller_kind ?? "web" });
+        const params = new URLSearchParams({
+            client_key: process.env.TIKTOK_CLIENT_KEY,
+            redirect_uri: process.env.TIKTOK_REDIRECT_URI,
+            state,
+            scope: TIKTOK_SCOPES.join(","),
+            response_type: "code",
+        });
+        const url = `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`;
+        slog("connect_url_built", { user_id, platform });
+        return success("Consent URL created", { url, platform });
+    }
+
     return error(501, `${platform} connect not supported.`);
+}
+
+// ── TikTok OAuth ───────────────────────────────────────────────────────
+
+const TIKTOK_SCOPES = ["user.info.basic", "video.publish", "video.upload"];
+const TIKTOK_API_BASE = "https://open.tiktokapis.com/v2";
+
+async function tiktok_exchange_code_for_token(code: string): Promise<{
+    access_token: string;
+    refresh_token: string;
+    open_id: string;
+    expires_in: number;
+    refresh_expires_in: number;
+    scope: string;
+    token_type: string;
+}> {
+    const res = await axios.post(
+        `${TIKTOK_API_BASE}/oauth/token/`,
+        new URLSearchParams({
+            client_key: process.env.TIKTOK_CLIENT_KEY!,
+            client_secret: process.env.TIKTOK_CLIENT_SECRET!,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: process.env.TIKTOK_REDIRECT_URI!,
+        }).toString(),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+    );
+    return res.data;
+}
+
+async function tiktok_refresh_token_call(refresh_token: string): Promise<{
+    access_token: string;
+    refresh_token: string;
+    open_id: string;
+    expires_in: number;
+    refresh_expires_in: number;
+}> {
+    const res = await axios.post(
+        `${TIKTOK_API_BASE}/oauth/token/`,
+        new URLSearchParams({
+            client_key: process.env.TIKTOK_CLIENT_KEY!,
+            client_secret: process.env.TIKTOK_CLIENT_SECRET!,
+            grant_type: "refresh_token",
+            refresh_token,
+        }).toString(),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+    );
+    return res.data;
+}
+
+async function tiktok_get_user_info(access_token: string, open_id: string): Promise<{ display_name?: string; avatar_url?: string }> {
+    try {
+        const res = await axios.get(`${TIKTOK_API_BASE}/user/info/`, {
+            headers: { Authorization: `Bearer ${access_token}` },
+            params: { fields: "display_name,avatar_url", open_id },
+        });
+        return res.data?.data?.user ?? {};
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * Public callback — TikTok redirects here after the user grants consent.
+ * Exchanges the code for tokens, fetches user info, and upserts the
+ * social_accounts row.
+ */
+export async function tiktok_callback(req: FastifyRequest, reply: FastifyReply) {
+    const { code, state, error: oauth_error } = (req.query ?? {}) as {
+        code?: string;
+        state?: string;
+        error?: string;
+    };
+
+    const close_popup = (msg?: string) => {
+        const safe = msg ? msg.replace(/'/g, "\\'") : "";
+        const body = msg
+            ? `<script>alert('${safe}');window.close();</script>`
+            : `<script>window.close();</script>`;
+        reply.header("Content-Type", "text/html").send(body);
+    };
+
+    if (oauth_error) {
+        slog("tiktok_callback_oauth_error", { oauth_error });
+        return close_popup(`OAuth error: ${oauth_error}`);
+    }
+    if (!code || !state) {
+        slog("tiktok_callback_missing_params", { has_code: !!code, has_state: !!state });
+        return close_popup("Missing OAuth code or state");
+    }
+
+    const { user_id, platform: caller_kind } = decode_state(state);
+    if (!user_id) {
+        slog("tiktok_callback_bad_state", { state_length: state.length });
+        return close_popup("Invalid OAuth state");
+    }
+
+    try {
+        const tokens = await tiktok_exchange_code_for_token(code);
+        slog("tiktok_tokens_received", {
+            user_id,
+            open_id: tokens.open_id,
+            expires_in: tokens.expires_in,
+        });
+
+        const user_info = await tiktok_get_user_info(tokens.access_token, tokens.open_id);
+        const display_name = user_info.display_name ?? null;
+
+        const expires_at = tokens.expires_in
+            ? new Date(Date.now() + tokens.expires_in * 1000)
+            : null;
+        const refresh_expires_at = tokens.refresh_expires_in
+            ? new Date(Date.now() + tokens.refresh_expires_in * 1000)
+            : null;
+
+        const where = { user_id, platform: "tiktok" as const, account_id: tokens.open_id } as any;
+        const existing = await SocialAccount.findOne({ where });
+
+        const payload = {
+            user_id,
+            platform: "tiktok" as const,
+            account_id: tokens.open_id,
+            account_name: display_name,
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            token_type: tokens.token_type ?? "Bearer",
+            expires_at,
+            scopes: tokens.scope ? tokens.scope.split(",").map((s: string) => s.trim()) : TIKTOK_SCOPES,
+            metadata: {
+                open_id: tokens.open_id,
+                refresh_expires_at: refresh_expires_at?.toISOString() ?? null,
+                avatar_url: user_info.avatar_url ?? null,
+            },
+            status: "connected",
+        };
+
+        if (existing) {
+            await existing.update(payload as any);
+            slog("tiktok_account_updated", { user_id, account_id: existing.id, open_id: tokens.open_id });
+        } else {
+            const created = await SocialAccount.create(payload as any);
+            slog("tiktok_account_created", { user_id, account_id: created.id, open_id: tokens.open_id });
+        }
+
+        if (caller_kind === "app") return close_popup("TikTok Connected Successfully!");
+        return close_popup();
+    } catch (err: any) {
+        slog("tiktok_callback_failed", { user_id, error: err?.message ?? String(err), details: err?.response?.data });
+        return close_popup(`Error connecting TikTok: ${err?.message ?? "unknown"}`);
+    }
 }
 
 // ── Facebook OAuth (used for both Facebook Page + Instagram Business) ─
@@ -587,6 +759,29 @@ export async function refresh_account_token(account: SocialAccount): Promise<Soc
         slog(`${account.platform}_token_refreshed`, {
             account_id: account.id,
             expires_in: long.expires_in,
+        });
+        return account;
+    }
+
+    if (account.platform === "tiktok") {
+        const tokens = await tiktok_refresh_token_call(account.refresh_token!);
+        const expires_at = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null;
+        const refresh_expires_at = tokens.refresh_expires_in
+            ? new Date(Date.now() + tokens.refresh_expires_in * 1000)
+            : null;
+        await account.update({
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expires_at,
+            status: "connected",
+            metadata: {
+                ...(account.metadata ?? {}),
+                refresh_expires_at: refresh_expires_at?.toISOString() ?? null,
+            },
+        } as any);
+        slog("tiktok_token_refreshed", {
+            account_id: account.id,
+            expires_in: tokens.expires_in,
         });
         return account;
     }

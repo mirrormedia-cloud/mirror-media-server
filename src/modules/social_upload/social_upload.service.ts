@@ -41,6 +41,10 @@ import {
     InstagramUploadResult,
 } from "../../services/social/instagram_upload.service";
 import {
+    upload_video_to_tiktok,
+    TikTokUploadResult,
+} from "../../services/social/tiktok_upload.service";
+import {
     sweep_youtube_copyright,
     check_and_handle_one,
 } from "../../services/social/youtube_copyright_sweep";
@@ -251,11 +255,12 @@ export async function create_upload(req: FastifyRequest) {
             // Pull the platform-keyed payload out of raw_analysis.
             const raw = (general_analysis?.raw_analysis ?? {}) as any;
             const parsed = raw.parsed ?? raw;
-            if (parsed && (parsed.youtube || parsed.instagram || parsed.facebook)) {
+            if (parsed && (parsed.youtube || parsed.instagram || parsed.facebook || parsed.tiktok)) {
                 general_analysis_json = {
                     youtube: parsed.youtube,
                     instagram: parsed.instagram,
                     facebook: parsed.facebook,
+                    tiktok: parsed.tiktok,
                 };
             }
             flog("analyze_media completed", {
@@ -264,9 +269,11 @@ export async function create_upload(req: FastifyRequest) {
                 has_youtube: !!general_analysis_json.youtube,
                 has_instagram: !!general_analysis_json.instagram,
                 has_facebook: !!general_analysis_json.facebook,
+                has_tiktok: !!general_analysis_json.tiktok,
                 yt_tags_count: general_analysis_json.youtube?.tags?.length ?? 0,
                 ig_hashtags_count: general_analysis_json.instagram?.hashtags?.length ?? 0,
                 fb_hashtags_count: general_analysis_json.facebook?.hashtags?.length ?? 0,
+                tt_hashtags_count: general_analysis_json.tiktok?.hashtags?.length ?? 0,
             });
         } catch (err: any) {
             general_analysis_error = err?.message ?? String(err);
@@ -315,7 +322,7 @@ export async function create_upload(req: FastifyRequest) {
             language: (p_over.language ?? "").toString(),
         };
 
-        if (platform !== "youtube" && platform !== "facebook" && platform !== "instagram") {
+        if (platform !== "youtube" && platform !== "facebook" && platform !== "instagram" && platform !== "tiktok") {
             // Defensive — shouldn't fire, but the type signature includes "general".
             return {
                 title: manual.title, description: manual.description, caption: manual.caption || manual.description,
@@ -412,9 +419,8 @@ export async function create_upload(req: FastifyRequest) {
                     },
                 }
                 : {
-                    // IG / FB: caption is the full body. Title kept for
-                    // traceability ("what manual title did the user
-                    // type") even though the upload uses caption.
+                    // IG / FB / TikTok: caption is the full body. Title kept
+                    // for traceability even though the upload uses caption.
                     [platform]: {
                         caption: details.caption,
                         title: details.title,
@@ -614,6 +620,38 @@ export async function create_upload(req: FastifyRequest) {
                 }
                 slog("upload_done", { upload_id: upload.id, platform, creation_id: ig.creation_id, scheduled: ig.scheduled });
                 flog("platform upload completed", { platform, upload_id: upload.id, scheduled: ig.scheduled, platform_media_id: ig.creation_id });
+            } else if (platform === "tiktok") {
+                const caption = details.caption || build_caption(details.description, details.tags, details.hashtags);
+                // Map visibility to TikTok privacy levels.
+                const privacy_level = body.visibility === "public"
+                    ? "PUBLIC_TO_EVERYONE"
+                    : body.visibility === "unlisted"
+                        ? "MUTUAL_FOLLOW_FRIENDS"
+                        : "SELF_ONLY";
+                const tt: TikTokUploadResult = await upload_video_to_tiktok({
+                    account,
+                    file_url,
+                    caption,
+                    privacy_level,
+                    publish_at: body.scheduledAt ?? null,
+                });
+                await upload.update({
+                    // TikTok publishes immediately (no native schedule API).
+                    status: "uploaded",
+                    platform_media_id: tt.publish_id,
+                    media_url: tt.share_url ?? null,
+                    published_at: new Date(),
+                    upload_result: {
+                        tiktok: {
+                            publish_id: tt.publish_id,
+                            share_url: tt.share_url,
+                            confirmed: tt.confirmed,
+                        },
+                    },
+                    error_message: null,
+                } as any);
+                slog("upload_done", { upload_id: upload.id, platform, publish_id: tt.publish_id });
+                flog("platform upload completed", { platform, upload_id: upload.id, platform_media_id: tt.publish_id });
             } else {
                 await upload.update({
                     status: "failed",
@@ -1055,7 +1093,7 @@ export async function list_upload_stats(req: FastifyRequest) {
     }
 
     const by_platform: Record<string, number> = {
-        youtube: 0, facebook: 0, instagram: 0,
+        youtube: 0, facebook: 0, instagram: 0, tiktok: 0,
     };
     for (const r of by_platform_rows) {
         const n = Number(r.count) || 0;

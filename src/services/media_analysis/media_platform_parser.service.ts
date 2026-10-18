@@ -57,7 +57,7 @@ export function to_media_details(
  */
 export function derive_caption(platform: MediaPlatform, details: MediaDetails, override?: string): string | undefined {
     if (override && override.trim()) return override.trim();
-    if (platform === "instagram" || platform === "facebook") {
+    if (platform === "instagram" || platform === "facebook" || platform === "tiktok") {
         return details.caption || details.description || undefined;
     }
     return undefined;
@@ -108,6 +108,7 @@ export type AnalysisJson = {
         category?: string; language?: string;
     };
     facebook?: { title?: string; hashtags?: string[] };
+    tiktok?: { title?: string; hashtags?: string[] };
 };
 
 export type ManualDetails = {
@@ -162,7 +163,7 @@ function strip_trailing_hashtags(text: string): string {
  * and any manual overrides. Caller decides which `platform` slice to use.
  */
 export function build_platform_upload_details(opts: {
-    platform: "youtube" | "facebook" | "instagram";
+    platform: "youtube" | "facebook" | "instagram" | "tiktok";
     auto_details: boolean;
     manual_details?: ManualDetails;
     analysis_json?: AnalysisJson;
@@ -198,13 +199,13 @@ export function build_platform_upload_details(opts: {
         };
     }
 
-    // Instagram + Facebook share the same caption-is-the-body shape.
-    // Priority: manual.caption → manual.title → analysis.title.
+    // Instagram, Facebook, and TikTok share the same caption-is-the-body
+    // shape. Priority: manual.caption → manual.title → analysis.title.
     // Hashtags are sourced from manual.hashtags if any, else from the
     // analysis hashtag array. The chosen body text has any trailing
     // hashtags stripped before we append the hashtag block, so we never
     // double-print (the prompt produces titles with hashtags inline).
-    const slice = opts.platform === "instagram" ? ig : fb;
+    const slice = opts.platform === "instagram" ? ig : opts.platform === "tiktok" ? (a.tiktok ?? {}) : fb;
     const ai_title = ai ? (slice.title ?? "") : "";
     const ai_hashtags = ai ? ensure_hash_prefix(slice.hashtags ?? []) : [];
 
@@ -270,6 +271,12 @@ export function to_platform_shape(platform: MediaPlatform, details: MediaDetails
                 description: details.description,
                 hashtags: details.hashtags ?? [],
                 keywords: details.keywords ?? [],
+            };
+        case "tiktok":
+            return {
+                title: details.title,
+                caption: details.caption ?? details.description,
+                hashtags: details.hashtags ?? [],
             };
         default:
             return {

@@ -151,6 +151,11 @@ export async function buildApp() {
     }
   });
 
+  // Public — TikTok domain verification. No auth, must be reachable by TikTok's crawler.
+  app.get("/tiktok", (_req, res) => {
+    res.header("Content-Type", "text/plain").send("tiktok-developers-site-verification=imlSPg15x5bkk4K4lvm1UfurUig2el28\n");
+  });
+
   app.register(authRoutes,    { prefix: "/api/auth" });
   app.register(profileRoutes, { prefix: "/api/profile" });
   // Public — Google OAuth callback. Lives outside the JWT scope because

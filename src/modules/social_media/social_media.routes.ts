@@ -20,6 +20,7 @@ import {
     get_connect_url,
     youtube_callback,
     facebook_callback,
+    tiktok_callback,
     get_platform_status,
     refresh_token,
     disconnect_platform,
@@ -65,6 +66,14 @@ export const socialMediaPublicRoutes: FastifyPluginAsync = async (app) => {
             await facebook_callback(req, reply);
         } catch (err) {
             console.log("Error:- facebook_callback unhandled", err);
+            if (!reply.sent) reply.header("Content-Type", "text/html").send("<script>window.close();</script>");
+        }
+    });
+    app.get("/tiktok/callback", async (req, reply) => {
+        try {
+            await tiktok_callback(req, reply);
+        } catch (err) {
+            console.log("Error:- tiktok_callback unhandled", err);
             if (!reply.sent) reply.header("Content-Type", "text/html").send("<script>window.close();</script>");
         }
     });

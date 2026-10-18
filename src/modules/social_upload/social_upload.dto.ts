@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram"] as const;
+export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram", "tiktok"] as const;
 
 /**
  * Manual values the user typed in the modal — used when auto_details is on
@@ -56,7 +56,7 @@ export const ScheduleItemParamDto = z.object({
 
 export const ListUploadsQueryDto = z.object({
     library_item_id: z.string().uuid().optional(),
-    platform: z.enum(SUPPORTED_PLATFORMS).optional(),
+    platform: z.enum([...SUPPORTED_PLATFORMS]).optional(),
     status: z.string().optional(),
     search: z.string().optional(),
     date_from: z.string().optional(),

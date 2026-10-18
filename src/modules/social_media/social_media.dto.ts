@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram"] as const;
+export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram", "tiktok"] as const;
 export type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
 
 export const PlatformParamSchema = z.object({
