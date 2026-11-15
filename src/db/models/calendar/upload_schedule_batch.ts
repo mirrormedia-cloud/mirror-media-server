@@ -35,7 +35,7 @@ export class UploadScheduleBatch extends Model<UploadScheduleBatch> {
     @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: true })
     scheduled: boolean | undefined;
 
-    /** ["facebook", "youtube", "instagram"] */
+    /** ["facebook", "youtube", "instagram", "tiktok"] */
     @Column({ type: DataType.JSONB, allowNull: false, defaultValue: [] })
     platforms: string[] | undefined;
 

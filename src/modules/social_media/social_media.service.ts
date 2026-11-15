@@ -19,6 +19,7 @@ import { SocialAccount, InstagramBotConfig } from "../../db/models";
 import { success, error } from "../../shared/http/response";
 import { HttpStatus } from "../../shared/http/status";
 import type { SupportedPlatform } from "./social_media.dto";
+import { is_platform_allowed_for_user } from "../../shared/platform_access";
 
 // ── OAuth helpers ──────────────────────────────────────────────────────
 
@@ -131,6 +132,10 @@ export async function get_connect_url(req: FastifyRequest) {
     const { platform: caller_kind } = (req.query ?? {}) as { platform?: string };
 
     slog("connect_url_start", { user_id, platform, caller_kind });
+
+    if (!(await is_platform_allowed_for_user(user_id, platform))) {
+        return error(HttpStatus.FORBIDDEN, "This platform is coming soon for your account");
+    }
 
     if (platform === "youtube") {
         if (!process.env.GOOGLE_CLIENT_ID || !process.env.SECRET_KEY) {

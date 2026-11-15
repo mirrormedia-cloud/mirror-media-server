@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SUPPORTED_PLATFORMS = ["facebook", "youtube", "instagram"] as const;
+export const SUPPORTED_PLATFORMS = ["facebook", "youtube", "instagram", "tiktok"] as const;
 export type SupportedPlatform = typeof SUPPORTED_PLATFORMS[number];
 
 export const FREQUENCIES = ["every_day", "every_week", "every_month", "custom_range"] as const;

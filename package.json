@@ -9,6 +9,7 @@
     "build": "rimraf dist && tsc",
     "start": "node dist/server.js",
     "db:sync": "tsx src/db/sync.ts",
+    "seed:test-account": "tsx src/scripts/create_test_account.ts",
     "lint:types": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
