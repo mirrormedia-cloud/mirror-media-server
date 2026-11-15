@@ -7,6 +7,7 @@ import { validate } from "../../shared/http/validate";
 import { uploadProfilePic } from "../../shared/upload/upload.config";
 import { HttpStatus } from "../../shared/http/status";
 import { serverError } from "../../shared/http/response";
+import { ensure_test_account } from "../../shared/test_account";
 
 const googleTokenVerifyHandler = async (req: FastifyRequest, res: FastifyReply) => {
     try {
@@ -208,7 +209,31 @@ const meHandler = async (req: FastifyRequest, res: FastifyReply) => {
     }
 };
 
+/**
+ * GET /api/auth/seed-test-account?key=<SEED_SECRET>
+ * Creates or resets the TikTok review account (test@gmail.com).
+ * Disabled unless SEED_SECRET is set in the environment.
+ */
+const seedTestAccountHandler = async (req: FastifyRequest, res: FastifyReply) => {
+    try {
+        const secret = process.env.SEED_SECRET;
+        if (!secret) {
+            return res.status(HttpStatus.NOT_FOUND).send({ success: false, message: "Not found" });
+        }
+        const { key } = (req.query ?? {}) as { key?: string };
+        if (key !== secret) {
+            return res.status(HttpStatus.FORBIDDEN).send({ success: false, message: "Invalid key" });
+        }
+        const result = await ensure_test_account();
+        res.status(HttpStatus.OK).send({ success: true, message: `Test account ${result.action}`, data: result });
+    } catch (err) {
+        console.log("Error:- seedTestAccountHandler", err);
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).send(serverError(err));
+    }
+};
+
 export const authRoutes: FastifyPluginAsync = async (app) => {
+    app.get("/seed-test-account", seedTestAccountHandler);
     app.post("/sso/google-token", { preHandler: validate(GoogleTokenDto) }, googleTokenVerifyHandler);
     app.post("/sso/verify", { preHandler: validate(SsoVerifyDto) }, ssoVerifyHandler);
     app.post("/sso/register", { preHandler: [uploadProfilePic, validate(SsoRegisterDto)] }, ssoRegisterHandler);
