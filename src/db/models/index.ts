@@ -24,6 +24,8 @@ export { UploadScheduleItem } from "./calendar/upload_schedule_item";
 export { SocialAccount } from "./social/social_account";
 export { SocialUpload } from "./social/social_upload";
 export { MediaAnalysisResult } from "./social/media_analysis_result";
+export { AutoPostConfig } from "./social/auto_post_config";
+export { AutoPostLog } from "./social/auto_post_log";
 
 export { NotificationHistory } from "./notification/notification_history";
 export { CalendarEventReminder } from "./notification/calendar_event_reminder";

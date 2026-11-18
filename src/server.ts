@@ -11,6 +11,7 @@ import { start_token_refresh_cron, stop_token_refresh_cron } from "./services/so
 import { start_reminder_worker, stop_reminder_worker } from "./cron/reminder-worker";
 import { start_health_ping_worker, stop_health_ping_worker } from "./cron/health-ping-worker";
 import { start_daily_digest_worker, stop_daily_digest_worker } from "./cron/daily-digest-worker";
+import { start_auto_post_cron, stop_auto_post_cron } from "./services/social/auto_post_cron";
 
 async function startServer() {
   console.log(`⚙️  SERVER_MODE=${process.env.SERVER_MODE ?? "—"} APP_ENV=${process.env.APP_ENV ?? "—"} NODE_ENV=${process.env.NODE_ENV ?? "—"}`);
@@ -47,6 +48,8 @@ async function startServer() {
     // Background: every minute, check if it's 08:00 IST and send each
     // WhatsApp-enabled user their daily plan overview (events + uploads + failures).
     start_daily_digest_worker();
+    // Background: every minute, fire Facebook Auto Post slots (AI thought → page feed).
+    start_auto_post_cron();
   } catch (err) {
     console.log("❌ Failed to start server", err);
     process.exit(1);
@@ -68,6 +71,7 @@ async function shutdown(signal: string) {
   try { stop_reminder_worker(); } catch { /* noop */ }
   try { stop_health_ping_worker(); } catch { /* noop */ }
   try { stop_daily_digest_worker(); } catch { /* noop */ }
+  try { stop_auto_post_cron(); } catch { /* noop */ }
   try { await closeDb(); } catch { /* noop */ }
   process.exit(0);
 }

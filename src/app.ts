@@ -40,6 +40,7 @@ import { notificationRoutes, notificationPublicRoutes } from "./modules/notifica
 import { cronsRoutes } from "./modules/crons/crons.routes";
 import { instagramWebhookPublicRoutes, instagramWebhookRoutes } from "./modules/instagram_webhook/routes";
 import { automationRoutes } from "./modules/automation/automation.routes";
+import { autoPostRoutes } from "./modules/auto_post/auto_post.routes";
 
 // auth middleware (used to wrap every /api/ott/* route below)
 import { authenticate } from "./shared/security/auth.middleware";
@@ -218,6 +219,8 @@ export async function buildApp() {
     await protectedApp.register(instagramWebhookRoutes, { prefix: "/api/instagram" });
     // Keyword-based comment automation rules (ManyChat-style).
     await protectedApp.register(automationRoutes, { prefix: "/api/automation" });
+    // Facebook Auto Post — AI text thoughts on a day/week/month schedule.
+    await protectedApp.register(autoPostRoutes, { prefix: "/api/auto-post" });
   });
 
   return app;
