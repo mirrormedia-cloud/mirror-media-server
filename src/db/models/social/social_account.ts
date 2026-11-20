@@ -12,7 +12,11 @@
 import { Table, Column, Model, DataType, ForeignKey, BelongsTo } from "sequelize-typescript";
 import { User } from "../auth/user";
 
-export type SocialPlatform = "youtube" | "facebook" | "instagram" | "tiktok";
+/**
+ * telegram: no OAuth — `access_token` holds the bot token, `account_id`
+ * the numeric chat id, `channel_name` the @username. No refresh/expiry.
+ */
+export type SocialPlatform = "youtube" | "facebook" | "instagram" | "tiktok" | "telegram";
 
 @Table({
     tableName: "social_accounts",

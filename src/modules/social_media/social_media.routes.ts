@@ -14,6 +14,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import {
     PlatformParamDto,
     ConnectQueryDto,
+    TelegramConnectDto,
 } from "./social_media.dto";
 import {
     list_accounts,
@@ -21,6 +22,7 @@ import {
     youtube_callback,
     facebook_callback,
     tiktok_callback,
+    telegram_connect,
     get_platform_status,
     refresh_token,
     disconnect_platform,
@@ -93,6 +95,15 @@ export const socialMediaRoutes: FastifyPluginAsync = async (app) => {
         "/:platform/connect",
         { preHandler: [validate(PlatformParamDto, "params"), validate(ConnectQueryDto, "query")] },
         wrap(get_connect_url),
+    );
+
+    // POST /api/social/telegram/connect — body { telegram_bot_token,
+    // telegram_channel_username }. Verifies the bot is an admin of the
+    // channel, then stores it. Telegram has no OAuth popup.
+    app.post(
+        "/telegram/connect",
+        { preHandler: validate(TelegramConnectDto, "body") },
+        wrap(telegram_connect),
     );
 
     // GET /api/social/:platform/status — connected? channel name?

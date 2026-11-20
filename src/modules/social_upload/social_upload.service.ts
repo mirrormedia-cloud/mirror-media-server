@@ -45,6 +45,10 @@ import {
     TikTokUploadResult,
 } from "../../services/social/tiktok_upload.service";
 import {
+    upload_video_to_telegram,
+    TelegramUploadResult,
+} from "../../services/social/telegram_upload.service";
+import {
     sweep_youtube_copyright,
     check_and_handle_one,
 } from "../../services/social/youtube_copyright_sweep";
@@ -359,9 +363,37 @@ export async function create_upload(req: FastifyRequest) {
         };
     };
 
+    /**
+     * Telegram: caption is the TITLE ONLY — no description, tags, or
+     * hashtags. Manual title wins; with auto_details we borrow the
+     * analysis' YouTube/Facebook title (trailing hashtags stripped).
+     */
+    const resolve_telegram_details = (): ReturnType<typeof resolve_details> => {
+        const p_over = (platform_overrides.telegram ?? {}) as Record<string, any>;
+        const m = body.manual_details ?? {};
+        const manual_title = (p_over.title || m.title || body.title || "").toString().trim();
+        const ai_raw = body.auto_details
+            ? (general_analysis_json.youtube?.title || general_analysis_json.facebook?.title || "")
+            : "";
+        const ai_title = ai_raw.replace(/(\s*#[\w_]+)+\s*$/u, "").trim();
+        const title = manual_title || ai_title;
+        return {
+            title,
+            description: "",
+            caption: title,
+            tags: [],
+            hashtags: [],
+            keywords: [],
+            category: null,
+            language: null,
+            analysis_id: ai_title && !manual_title ? (general_analysis?.id ?? null) : null,
+            source: manual_title ? "manual" : "generated",
+        };
+    };
+
     for (const platform of body.platforms) {
         // ── PHASE 3: build final details (after analysis has resolved) ─
-        const details_raw = resolve_details(platform);
+        const details_raw = platform === "telegram" ? resolve_telegram_details() : resolve_details(platform);
         // When auto_details is on and analysis failed, ensure there is
         // always a title so the upload proceeds. Fallback chain:
         //   1. user-supplied manual_details.title
@@ -652,6 +684,42 @@ export async function create_upload(req: FastifyRequest) {
                 } as any);
                 slog("upload_done", { upload_id: upload.id, platform, publish_id: tt.publish_id });
                 flog("platform upload completed", { platform, upload_id: upload.id, platform_media_id: tt.publish_id });
+            } else if (platform === "telegram") {
+                // Caption = title only. Sends the R2 URL directly; the
+                // service falls back to a streamed multipart upload if
+                // Telegram can't fetch the URL (e.g. file > 20 MB).
+                const tg_save_type = (item as any).save_type as string | undefined;
+                const tg_mime = (item as any).mime_type as string | undefined;
+                const tg_is_image = tg_save_type === "image"
+                    || tg_save_type === "thumbnail"
+                    || (tg_mime ? tg_mime.toLowerCase().startsWith("image/") : false);
+                const tg: TelegramUploadResult = await upload_video_to_telegram({
+                    account,
+                    file_url,
+                    caption: details.title,
+                    media_kind: tg_is_image ? "image" : "video",
+                    mime_type: tg_mime ?? null,
+                    file_name: (item as any).file_name ?? null,
+                });
+                await upload.update({
+                    // Telegram Bot API has no scheduling — posts immediately.
+                    status: "uploaded",
+                    platform_media_id: String(tg.message_id),
+                    platform_post_id: String(tg.message_id),
+                    media_url: tg.post_url,
+                    published_at: new Date(),
+                    upload_result: {
+                        telegram: {
+                            message_id: tg.message_id,
+                            chat_id: tg.chat_id,
+                            post_url: tg.post_url,
+                            method: tg.method,
+                        },
+                    },
+                    error_message: null,
+                } as any);
+                slog("upload_done", { upload_id: upload.id, platform, message_id: tg.message_id, method: tg.method });
+                flog("platform upload completed", { platform, upload_id: upload.id, platform_media_id: tg.message_id });
             } else {
                 await upload.update({
                     status: "failed",
@@ -1093,7 +1161,7 @@ export async function list_upload_stats(req: FastifyRequest) {
     }
 
     const by_platform: Record<string, number> = {
-        youtube: 0, facebook: 0, instagram: 0, tiktok: 0,
+        youtube: 0, facebook: 0, instagram: 0, tiktok: 0, telegram: 0,
     };
     for (const r of by_platform_rows) {
         const n = Number(r.count) || 0;

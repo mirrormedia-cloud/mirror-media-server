@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram", "tiktok"] as const;
+export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram", "tiktok", "telegram"] as const;
 
 /**
  * Manual values the user typed in the modal — used when auto_details is on

@@ -18,8 +18,9 @@ import { Op } from "sequelize";
 import { SocialAccount, InstagramBotConfig } from "../../db/models";
 import { success, error } from "../../shared/http/response";
 import { HttpStatus } from "../../shared/http/status";
-import type { SupportedPlatform } from "./social_media.dto";
+import type { SupportedPlatform, TelegramConnectInput } from "./social_media.dto";
 import { is_platform_allowed_for_user } from "../../shared/platform_access";
+import { verify_telegram_bot } from "../../services/social/telegram_upload.service";
 
 // ── OAuth helpers ──────────────────────────────────────────────────────
 
@@ -183,6 +184,10 @@ export async function get_connect_url(req: FastifyRequest) {
         return success("Consent URL created", { url, platform });
     }
 
+    if (platform === "telegram") {
+        return error(HttpStatus.BAD_REQUEST, "Telegram has no OAuth — POST bot token + channel to /api/social/telegram/connect.");
+    }
+
     if (platform === "tiktok") {
         if (!process.env.TIKTOK_CLIENT_KEY || !process.env.TIKTOK_CLIENT_SECRET || !process.env.TIKTOK_REDIRECT_URI) {
             slog("tiktok_oauth_not_configured", {
@@ -206,6 +211,74 @@ export async function get_connect_url(req: FastifyRequest) {
     }
 
     return error(501, `${platform} connect not supported.`);
+}
+
+// ── Telegram (bot token, no OAuth) ─────────────────────────────────────
+
+/**
+ * Verify the bot token + channel against the Bot API (getMe → getChat →
+ * getChatMember), then upsert a `telegram` social_accounts row keyed by
+ * (user_id, chat id). The bot token lives in `access_token` and is never
+ * returned by `account_dto`.
+ */
+export async function telegram_connect(req: FastifyRequest) {
+    const user_id = (req as any).userId;
+    if (!user_id) return error(HttpStatus.UNAUTHORIZED, "Not authenticated");
+    const body = req.body as TelegramConnectInput;
+
+    if (!(await is_platform_allowed_for_user(user_id, "telegram"))) {
+        return error(HttpStatus.FORBIDDEN, "This platform is coming soon for your account");
+    }
+
+    slog("telegram_connect_start", { user_id, channel: body.telegram_channel_username });
+
+    let v;
+    try {
+        v = await verify_telegram_bot(body.telegram_bot_token, body.telegram_channel_username);
+    } catch (err: any) {
+        slog("telegram_verify_failed", { user_id, error: err?.message });
+        return error(HttpStatus.BAD_REQUEST, err?.message ?? "Telegram verification failed");
+    }
+
+    const chat_id = String(v.chat.id);
+    const display = v.chat.title ?? (v.chat.username ? `@${v.chat.username}` : chat_id);
+    const payload = {
+        user_id,
+        platform: "telegram" as const,
+        account_id: chat_id,
+        account_name: display,
+        channel_id: chat_id,
+        channel_name: v.chat.username ? `@${v.chat.username}` : null,
+        access_token: body.telegram_bot_token.trim(),
+        refresh_token: null,
+        token_type: "bot",
+        expires_at: null,
+        scopes: [],
+        metadata: {
+            bot_id: v.bot.id,
+            bot_username: v.bot.username,
+            chat_username: v.chat.username,
+            chat_type: v.chat.type,
+            bot_status: v.bot_status,
+            verified_at: new Date().toISOString(),
+        },
+        status: "connected",
+    };
+
+    const existing = await SocialAccount.findOne({
+        where: { user_id, platform: "telegram", account_id: chat_id } as any,
+    });
+    let row: SocialAccount;
+    if (existing) {
+        await existing.update(payload as any);
+        row = existing;
+        slog("telegram_account_updated", { user_id, account_id: existing.id, chat_id });
+    } else {
+        row = await SocialAccount.create(payload as any);
+        slog("telegram_account_created", { user_id, account_id: row.id, chat_id });
+    }
+
+    return success("Telegram connected", account_dto(row));
 }
 
 // ── TikTok OAuth ───────────────────────────────────────────────────────

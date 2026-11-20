@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram", "tiktok"] as const;
+export const SUPPORTED_PLATFORMS = ["youtube", "facebook", "instagram", "tiktok", "telegram"] as const;
 export type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
 
 export const PlatformParamSchema = z.object({
@@ -20,6 +20,14 @@ export const ConnectQueryDto = z.object({
     platform: z.enum(["web", "app"]).optional(),
 });
 export type ConnectQueryInput = z.infer<typeof ConnectQueryDto>;
+
+/** Telegram has no OAuth — the user pastes a bot token + channel. */
+export const TelegramConnectDto = z.object({
+    telegram_bot_token: z.string().trim()
+        .regex(/^\d+:[A-Za-z0-9_-]{20,}$/, "Bot token looks invalid — copy it from @BotFather (format 123456:ABC…)"),
+    telegram_channel_username: z.string().trim().min(1, "Channel username is required").max(200),
+});
+export type TelegramConnectInput = z.infer<typeof TelegramConnectDto>;
 
 export const CallbackQueryDto = z.object({
     code: z.string().min(1),
