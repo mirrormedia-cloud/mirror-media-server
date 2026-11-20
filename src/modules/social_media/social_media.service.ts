@@ -265,20 +265,28 @@ export async function telegram_connect(req: FastifyRequest) {
         status: "connected",
     };
 
-    const existing = await SocialAccount.findOne({
-        where: { user_id, platform: "telegram", account_id: chat_id } as any,
-    });
-    let row: SocialAccount;
-    if (existing) {
-        await existing.update(payload as any);
-        row = existing;
-        slog("telegram_account_updated", { user_id, account_id: existing.id, chat_id });
-    } else {
-        row = await SocialAccount.create(payload as any);
-        slog("telegram_account_created", { user_id, account_id: row.id, chat_id });
+    try {
+        const existing = await SocialAccount.findOne({
+            where: { user_id, platform: "telegram", account_id: chat_id } as any,
+        });
+        let row: SocialAccount;
+        if (existing) {
+            await existing.update(payload as any);
+            row = existing;
+            slog("telegram_account_updated", { user_id, account_id: existing.id, chat_id });
+        } else {
+            row = await SocialAccount.create(payload as any);
+            slog("telegram_account_created", { user_id, account_id: row.id, chat_id });
+        }
+        return success("Telegram connected", account_dto(row));
+    } catch (err: any) {
+        // Surface the real DB error (e.g. a legacy ENUM/CHECK constraint on
+        // social_accounts.platform) instead of a generic 500.
+        const detail = err?.parent?.message ?? err?.original?.message ?? err?.message ?? String(err);
+        console.log("Error:- telegram_connect save failed", err);
+        slog("telegram_save_failed", { user_id, chat_id, error: detail });
+        return error(HttpStatus.INTERNAL_SERVER_ERROR, `Bot verified, but saving the account failed: ${detail}`);
     }
-
-    return success("Telegram connected", account_dto(row));
 }
 
 // ── TikTok OAuth ───────────────────────────────────────────────────────

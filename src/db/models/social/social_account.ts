@@ -38,7 +38,7 @@ export class SocialAccount extends Model<SocialAccount> {
     user: User | undefined;
 
     @Column({ type: DataType.STRING(50), allowNull: false })
-    platform: SocialPlatform | undefined;
+    platform: string | undefined;
 
     // Generic identifiers — platform-specific aliases below for clarity.
     @Column({ type: DataType.TEXT, allowNull: true })
