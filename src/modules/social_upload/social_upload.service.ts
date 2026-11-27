@@ -163,6 +163,71 @@ function build_caption(description: string, tags: string[], hashtags: string[]):
     return parts.join("\n\n");
 }
 
+// ── TikTok publish (shared by create_upload + the scheduled cron) ──────
+
+export interface TikTokPendingOptions {
+    allow_comment: boolean;
+    allow_duet: boolean;
+    allow_stitch: boolean;
+    brand_organic_toggle: boolean;
+    brand_content_toggle: boolean;
+}
+
+/**
+ * Upload one video to TikTok and stamp the SocialUpload row with the
+ * result. Throws on failure — callers own error handling/notifications.
+ */
+export async function publish_tiktok_upload(args: {
+    upload: SocialUpload;
+    account: SocialAccount;
+    file_url: string;
+    caption: string;
+    privacy_level: string;
+    options: TikTokPendingOptions | null;
+}): Promise<TikTokUploadResult> {
+    const { upload, account, file_url, caption, privacy_level, options } = args;
+    const tt: TikTokUploadResult = await upload_video_to_tiktok({
+        account,
+        file_url,
+        caption,
+        privacy_level: privacy_level as any,
+        ...(options ? {
+            disable_comment: !options.allow_comment,
+            disable_duet: !options.allow_duet,
+            disable_stitch: !options.allow_stitch,
+            brand_organic_toggle: options.brand_organic_toggle,
+            brand_content_toggle: options.brand_content_toggle,
+        } : {}),
+    });
+    // TikTok returns the public post ID (not a URL). Build a link to the
+    // video when we know the @username; otherwise link to the profile.
+    const username = (account.metadata as any)?.username as string | undefined;
+    const post_id = tt.share_url && /^\d+$/.test(tt.share_url) ? tt.share_url : null;
+    const media_url = username
+        ? (post_id ? `https://www.tiktok.com/@${username}/video/${post_id}` : `https://www.tiktok.com/@${username}`)
+        : null;
+    await upload.update({
+        status: "uploaded",
+        platform_media_id: tt.publish_id,
+        platform_post_id: post_id,
+        media_url,
+        published_at: new Date(),
+        upload_result: {
+            tiktok: {
+                publish_id: tt.publish_id,
+                share_url: tt.share_url,
+                confirmed: tt.confirmed,
+                inbox: tt.inbox,
+                privacy_level: tt.privacy_level,
+                fallback_reason: tt.fallback_reason,
+                ...(tt.inbox ? { note: "Sent to the TikTok inbox as a draft — open TikTok to finish posting." } : {}),
+            },
+        },
+        error_message: null,
+    } as any);
+    return tt;
+}
+
 // ── Upload ─────────────────────────────────────────────────────────────
 
 export async function create_upload(req: FastifyRequest) {
@@ -665,41 +730,32 @@ export async function create_upload(req: FastifyRequest) {
                             ? "MUTUAL_FOLLOW_FRIENDS"
                             : "SELF_ONLY"
                 );
-                const tt: TikTokUploadResult = await upload_video_to_tiktok({
-                    account,
-                    file_url,
-                    caption,
-                    privacy_level,
-                    ...(tt_opts ? {
-                        disable_comment: !tt_opts.allow_comment,
-                        disable_duet: !tt_opts.allow_duet,
-                        disable_stitch: !tt_opts.allow_stitch,
-                        brand_organic_toggle: tt_opts.brand_organic_toggle,
-                        brand_content_toggle: tt_opts.brand_content_toggle,
-                    } : {}),
-                    publish_at: body.scheduledAt ?? null,
-                });
-                await upload.update({
-                    // TikTok publishes immediately (no native schedule API).
-                    status: "uploaded",
-                    platform_media_id: tt.publish_id,
-                    media_url: tt.share_url ?? null,
-                    published_at: new Date(),
-                    upload_result: {
-                        tiktok: {
-                            publish_id: tt.publish_id,
-                            share_url: tt.share_url,
-                            confirmed: tt.confirmed,
-                            inbox: tt.inbox,
-                            privacy_level: tt.privacy_level,
-                            fallback_reason: tt.fallback_reason,
-                            ...(tt.inbox ? { note: "Sent to the TikTok inbox as a draft — open TikTok to finish posting." } : {}),
+                // TikTok's API has no "publish later" — for a future time we
+                // hold the row as `scheduled` with everything needed to post,
+                // and the auto-publish cron uploads it at scheduled_at.
+                const publish_at_ms = body.scheduledAt ? new Date(body.scheduledAt).getTime() : NaN;
+                if (Number.isFinite(publish_at_ms) && publish_at_ms - Date.now() > 60_000) {
+                    await upload.update({
+                        status: "scheduled",
+                        upload_result: {
+                            tiktok: {
+                                deferred_publish: true,
+                                note: "Held by the server; the auto-publish cron posts it to TikTok at scheduledAt.",
+                            },
                         },
-                    },
-                    error_message: null,
-                } as any);
-                slog("upload_done", { upload_id: upload.id, platform, publish_id: tt.publish_id });
-                flog("platform upload completed", { platform, upload_id: upload.id, platform_media_id: tt.publish_id });
+                        metadata: {
+                            ...(upload.metadata ?? {}),
+                            tiktok_pending: { caption, privacy_level, options: tt_opts ?? null },
+                        },
+                        error_message: null,
+                    } as any);
+                    slog("tiktok_deferred", { upload_id: upload.id, scheduledAt: body.scheduledAt });
+                    flog("platform upload deferred", { platform, upload_id: upload.id, scheduledAt: body.scheduledAt });
+                } else {
+                    const tt = await publish_tiktok_upload({ upload, account, file_url, caption, privacy_level, options: tt_opts ?? null });
+                    slog("upload_done", { upload_id: upload.id, platform, publish_id: tt.publish_id });
+                    flog("platform upload completed", { platform, upload_id: upload.id, platform_media_id: tt.publish_id });
+                }
             } else if (platform === "telegram") {
                 // Caption = title only. Sends the R2 URL directly; the
                 // service falls back to a streamed multipart upload if

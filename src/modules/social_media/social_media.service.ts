@@ -324,6 +324,12 @@ export async function get_tiktok_creator_info(req: FastifyRequest) {
 
     try {
         const info = await query_creator_info(account.access_token!);
+        // Remember the @username so uploads can link to the profile/video.
+        if (info.creator_username && (account.metadata as any)?.username !== info.creator_username) {
+            await account.update({
+                metadata: { ...(account.metadata ?? {}), username: info.creator_username },
+            } as any);
+        }
         return success("TikTok creator info", { ...info, account_id: account.id });
     } catch (err: any) {
         const tt = err?.response?.data?.error;

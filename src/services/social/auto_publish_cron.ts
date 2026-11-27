@@ -28,8 +28,10 @@ import {
     SocialUpload,
     UploadScheduleItem,
     UploadScheduleBatch,
+    OttLibraryItem,
 } from "../../db/models";
-import { upload_schedule_item } from "../../modules/social_upload/social_upload.service";
+import { upload_schedule_item, publish_tiktok_upload } from "../../modules/social_upload/social_upload.service";
+import { resolve_upload_url } from "../../modules/ott_library/ott_library_r2.service";
 import { publish_existing_instagram_container } from "./instagram_upload.service";
 import { sendPushToUser } from "../notification/firebase-notification.service";
 import { register, run } from "../../cron/registry";
@@ -295,6 +297,83 @@ async function publish_due_ig_containers() {
     return { published, failed };
 }
 
+/**
+ * Phase C — publish TikTok uploads held for their scheduled time.
+ * create_upload stores { caption, privacy_level, options } in
+ * metadata.tiktok_pending when scheduledAt is in the future (TikTok has
+ * no native scheduling). Rows are claimed with a conditional UPDATE
+ * (scheduled → uploading) so overlapping ticks can't double-post.
+ */
+const MAX_TIKTOK_PER_TICK = 3;
+
+async function publish_due_tiktok_uploads() {
+    const due = await SocialUpload.findAll({
+        where: {
+            platform: "tiktok",
+            status: "scheduled",
+            scheduled_at: { [Op.lte]: new Date() } as any,
+        } as any,
+        order: [["scheduled_at", "ASC"]],
+        limit: MAX_TIKTOK_PER_TICK,
+    });
+    if (due.length === 0) return { published: 0, failed: 0 };
+
+    let published = 0;
+    let failed = 0;
+    for (const u of due) {
+        const [claimed] = await SocialUpload.update(
+            { status: "uploading" } as any,
+            { where: { id: u.id, status: "scheduled" } as any },
+        );
+        if (claimed === 0) continue;   // another tick took it
+
+        const fail = async (message: string) => {
+            await u.update({ status: "failed", error_message: message.slice(0, 500) } as any);
+            failed += 1;
+            try {
+                await sendPushToUser({
+                    user_id: u.user_id!,
+                    title: "TikTok Upload Failed",
+                    body: `Your scheduled TikTok post could not be published: ${message.slice(0, 150)}`,
+                    type: "error",
+                    module: "tiktok",
+                    event_type: "platform_upload_failed",
+                    related_id: u.id,
+                    redirect_url: "/dashboard/media-uploads",
+                });
+            } catch (notify_err) { console.log("Error:- cron push tiktok failed", notify_err); }
+        };
+
+        try {
+            const pending = ((u.metadata ?? {}) as any).tiktok_pending;
+            if (!pending) { await fail("Missing TikTok post settings for this scheduled upload."); continue; }
+            const account = u.social_account_id ? await SocialAccount.findByPk(u.social_account_id) : null;
+            if (!account || account.status !== "connected") { await fail("TikTok account is no longer connected. Reconnect it and reschedule."); continue; }
+            const item = u.library_item_id ? await OttLibraryItem.findByPk(u.library_item_id) : null;
+            if (!item) { await fail("The library video was deleted."); continue; }
+            // Resolve a fresh URL now — presigned URLs from schedule time have expired.
+            const file_url = await resolve_upload_url(item as any);
+
+            clog("tiktok_publish_due", { upload_id: u.id, scheduled_at: (u as any).scheduled_at });
+            const tt = await publish_tiktok_upload({
+                upload: u,
+                account,
+                file_url,
+                caption: pending.caption ?? "",
+                privacy_level: pending.privacy_level ?? "SELF_ONLY",
+                options: pending.options ?? null,
+            });
+            clog("tiktok_published", { upload_id: u.id, publish_id: tt.publish_id });
+            published += 1;
+        } catch (err: any) {
+            const msg = err?.response?.data?.message ?? err?.message ?? "TikTok publish failed";
+            clog("tiktok_publish_failed", { upload_id: u.id, error: msg });
+            await fail(msg);
+        }
+    }
+    return { published, failed };
+}
+
 let _interval: NodeJS.Timeout | null = null;
 
 /**
@@ -304,15 +383,18 @@ let _interval: NodeJS.Timeout | null = null;
 async function auto_publish_tick(): Promise<string> {
     const a = await fire_due_schedule_items();
     const b = await publish_due_ig_containers();
-    if (a.fired || a.skipped || b.published || b.failed) {
+    const c = await publish_due_tiktok_uploads();
+    if (a.fired || a.skipped || b.published || b.failed || c.published || c.failed) {
         clog("tick_summary", {
             schedule_fired: a.fired,
             schedule_skipped: a.skipped,
             ig_published: b.published,
             ig_failed: b.failed,
+            tiktok_published: c.published,
+            tiktok_failed: c.failed,
         });
     }
-    return `fired=${a.fired} skipped=${a.skipped} ig_published=${b.published} ig_failed=${b.failed}`;
+    return `fired=${a.fired} skipped=${a.skipped} ig_published=${b.published} ig_failed=${b.failed} tiktok_published=${c.published} tiktok_failed=${c.failed}`;
 }
 
 export function start_auto_publish_cron(): void {
@@ -322,7 +404,7 @@ export function start_auto_publish_cron(): void {
     register({
         id: CRON_ID,
         label: "Auto-Publish Scheduler",
-        description: "Fires calendar schedule items whose time has passed (max 3 per tick) and publishes Instagram containers held for scheduled release.",
+        description: "Fires calendar schedule items whose time has passed (max 3 per tick), publishes Instagram containers held for scheduled release, and posts scheduled TikTok uploads.",
         interval_ms: TICK_INTERVAL_MS,
     }, auto_publish_tick);
 
