@@ -205,6 +205,9 @@ export async function get_connect_url(req: FastifyRequest) {
             state,
             scope: TIKTOK_SCOPES.join(","),
             response_type: "code",
+            // Always show TikTok's consent screen, even if the user already
+            // authorized this app (otherwise TikTok silently skips it).
+            disable_auto_auth: "1",
         });
         const url = `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`;
         slog("connect_url_built", { user_id, platform });
