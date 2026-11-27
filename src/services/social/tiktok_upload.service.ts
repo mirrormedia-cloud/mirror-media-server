@@ -51,6 +51,10 @@ export interface TikTokUploadOptions {
     disable_comment?: boolean;
     disable_duet?: boolean;
     disable_stitch?: boolean;
+    /** Commercial disclosure: promoting the creator's own business ("Promotional content"). */
+    brand_organic_toggle?: boolean;
+    /** Commercial disclosure: promoting a third party ("Paid partnership"). */
+    brand_content_toggle?: boolean;
     publish_at?: string | null;
     /**
      * When true, uses /v2/post/publish/inbox/video/init/ (video.upload scope).
@@ -69,6 +73,12 @@ export interface TikTokUploadResult {
     publish_id: string;
     share_url: string | null;
     confirmed: boolean;
+    /** True when the video went to the user's TikTok inbox as a draft. */
+    inbox: boolean;
+    /** Set when we fell back from Direct Post to inbox, with the reason. */
+    fallback_reason: string | null;
+    /** privacy_level actually sent (may differ from the requested one). */
+    privacy_level: string;
 }
 
 // ── Step 1: download file from R2 ─────────────────────────────────────
@@ -96,10 +106,20 @@ async function download_from_r2(url: string): Promise<Buffer> {
 // TikTok requires this call before init to verify the account can publish
 // and to retrieve available privacy levels.
 
-async function query_creator_info(access_token: string): Promise<{
+/** Shape of /v2/post/publish/creator_info/query/ — drives the post UI. */
+export interface TikTokCreatorInfo {
     creator_available: boolean;
+    creator_avatar_url: string | null;
+    creator_username: string | null;
+    creator_nickname: string | null;
     privacy_level_options: string[];
-}> {
+    comment_disabled: boolean;
+    duet_disabled: boolean;
+    stitch_disabled: boolean;
+    max_video_post_duration_sec: number | null;
+}
+
+export async function query_creator_info(access_token: string): Promise<TikTokCreatorInfo> {
     slog("query_creator_info");
     let res: any;
     try {
@@ -120,9 +140,21 @@ async function query_creator_info(access_token: string): Promise<{
     }
 
     const data = res.data?.data ?? {};
+    // TikTok signals "can't post right now" (e.g. spam_risk_too_many_posts,
+    // reached_active_user_cap) via a non-"ok" error code on a 200.
+    const err_code: string = res.data?.error?.code ?? "ok";
     return {
-        creator_available: data.creator_available ?? false,
+        creator_available: data.creator_available ?? err_code === "ok",
+        creator_avatar_url: data.creator_avatar_url ?? null,
+        creator_username: data.creator_username ?? null,
+        creator_nickname: data.creator_nickname ?? null,
         privacy_level_options: data.privacy_level_options ?? [],
+        comment_disabled: !!data.comment_disabled,
+        duet_disabled: !!data.duet_disabled,
+        stitch_disabled: !!data.stitch_disabled,
+        max_video_post_duration_sec: typeof data.max_video_post_duration_sec === "number"
+            ? data.max_video_post_duration_sec
+            : null,
     };
 }
 
@@ -144,6 +176,8 @@ async function init_file_upload(
         disable_comment: boolean;
         disable_duet: boolean;
         disable_stitch: boolean;
+        brand_organic_toggle: boolean;
+        brand_content_toggle: boolean;
         inbox_mode: boolean;
     },
 ): Promise<InitResult> {
@@ -155,21 +189,28 @@ async function init_file_upload(
     const chunk_size        = opts.file_size <= MAX_SINGLE_CHUNK ? opts.file_size : MULTI_CHUNK_SIZE;
     const total_chunk_count = Math.ceil(opts.file_size / chunk_size);
 
-    const body = {
-        post_info: {
-            title: opts.caption.slice(0, 2200),
-            privacy_level: opts.privacy_level,
-            disable_comment: opts.disable_comment,
-            disable_duet: opts.disable_duet,
-            disable_stitch: opts.disable_stitch,
-        },
-        source_info: {
-            source: "FILE_UPLOAD",
-            video_size: opts.file_size,
-            chunk_size,
-            total_chunk_count,
-        },
+    const source_info = {
+        source: "FILE_UPLOAD",
+        video_size: opts.file_size,
+        chunk_size,
+        total_chunk_count,
     };
+    // Inbox (draft) uploads take source_info only — caption/privacy are
+    // chosen by the user inside the TikTok app when they finish the post.
+    const body: Record<string, any> = opts.inbox_mode
+        ? { source_info }
+        : {
+            post_info: {
+                title: opts.caption.slice(0, 2200),
+                privacy_level: opts.privacy_level,
+                disable_comment: opts.disable_comment,
+                disable_duet: opts.disable_duet,
+                disable_stitch: opts.disable_stitch,
+                brand_organic_toggle: opts.brand_organic_toggle,
+                brand_content_toggle: opts.brand_content_toggle,
+            },
+            source_info,
+        };
 
     slog("init_request", { file_size: opts.file_size, chunk_size, total_chunk_count });
 
@@ -205,9 +246,23 @@ async function init_file_upload(
     return {
         publish_id: data.publish_id,
         upload_url: data.upload_url,
-        chunk_size: body.source_info.chunk_size,
-        total_chunk_count: body.source_info.total_chunk_count,
+        chunk_size,
+        total_chunk_count,
     };
+}
+
+/**
+ * TikTok returns this until the app passes the Content Posting API
+ * (Direct Post) audit — separate from regular app review. Unaudited
+ * clients may only direct-post SELF_ONLY to PRIVATE accounts.
+ */
+const UNAUDITED_HINT =
+    "TikTok blocked a public post: this app has not passed the Content Posting API (Direct Post) audit, "
+    + "so it can only post privately to private accounts. Apply for the audit in the TikTok Developer Portal "
+    + "(Content Posting API → Direct Post). Public posts work once it is approved.";
+
+function is_unaudited_error(err: any): boolean {
+    return err?.response?.data?.error?.code === "unaudited_client_can_only_post_to_private_accounts";
 }
 
 // ── Step 3: stream upload ──────────────────────────────────────────────
@@ -308,9 +363,9 @@ export async function upload_video_to_tiktok(opts: TikTokUploadOptions): Promise
     const token = opts.account.access_token;
     if (!token) throw new Error("TikTok account has no access token. Reconnect the account.");
 
-    const privacy_level = opts.privacy_level ?? "SELF_ONLY";
+    const requested_privacy = opts.privacy_level ?? "SELF_ONLY";
 
-    slog("upload_start", { account_id: opts.account.id, privacy_level, caption_len: opts.caption.length });
+    slog("upload_start", { account_id: opts.account.id, requested_privacy, caption_len: opts.caption.length });
 
     // Step 1a — creator info pre-check (non-fatal; unaudited apps may return false).
     const creator = await query_creator_info(token);
@@ -319,23 +374,60 @@ export async function upload_video_to_tiktok(opts: TikTokUploadOptions): Promise
         slog("creator_unavailable_warning", { note: "creator_available=false; proceeding anyway — TikTok will reject if truly ineligible" });
     }
 
+    // Never silently downgrade a public post to private. If TikTok doesn't
+    // offer the requested level for this creator (unaudited apps only get
+    // ["SELF_ONLY"]), fail with an actionable message instead.
+    const options = creator.privacy_level_options;
+    if (options.length > 0 && !options.includes(requested_privacy)) {
+        slog("privacy_level_not_allowed", { requested_privacy, options });
+        throw new Error(
+            requested_privacy === "PUBLIC_TO_EVERYONE"
+                ? `${UNAUDITED_HINT} (TikTok allows only: ${options.join(", ")})`
+                : `TikTok does not allow privacy "${requested_privacy}" for this account (allowed: ${options.join(", ")}).`,
+        );
+    }
+    const privacy_level = requested_privacy;
+
     // Step 1b — download file (GET only; R2 presigned URLs reject HEAD).
     const buffer = await download_from_r2(opts.file_url);
     const file_size = buffer.length;
     slog("file_size_resolved", { file_size });
 
-    const inbox_mode = opts.inbox_mode ?? (process.env.TIKTOK_INBOX_MODE === "true");
+    let inbox_mode = opts.inbox_mode ?? (process.env.TIKTOK_INBOX_MODE === "true");
+    let fallback_reason: string | null = null;
 
-    // Step 2 — init and get upload_url.
-    const init = await init_file_upload(token, {
+    const init_opts = {
         file_size,
         caption: opts.caption,
         privacy_level,
         disable_comment: opts.disable_comment ?? false,
         disable_duet: opts.disable_duet ?? false,
         disable_stitch: opts.disable_stitch ?? false,
-        inbox_mode,
-    });
+        brand_organic_toggle: opts.brand_organic_toggle ?? false,
+        brand_content_toggle: opts.brand_content_toggle ?? false,
+    };
+
+    // Step 2 — init and get upload_url (Direct Post by default).
+    // If TikTok refuses because the app hasn't passed the Content Posting
+    // API audit: by default fail with a clear message. Opt in to sending
+    // it as an inbox draft instead with TIKTOK_UNAUDITED_INBOX_FALLBACK=true.
+    let init: InitResult;
+    try {
+        init = await init_file_upload(token, { ...init_opts, inbox_mode });
+    } catch (err: any) {
+        if (inbox_mode || !is_unaudited_error(err)) throw err;
+        if (process.env.TIKTOK_UNAUDITED_INBOX_FALLBACK !== "true") {
+            const e: any = new Error(UNAUDITED_HINT);
+            // No `status`: a 403 here is NOT a token problem, so don't trip
+            // the dispatcher's "Reconnect Required" push.
+            e.response = { status: undefined, tiktok_http_status: err?.response?.status, data: { message: UNAUDITED_HINT, tiktok_error: err?.response?.data?.error } };
+            throw e;
+        }
+        fallback_reason = "unaudited_client_can_only_post_to_private_accounts";
+        slog("direct_post_refused_fallback_inbox", { reason: fallback_reason });
+        inbox_mode = true;
+        init = await init_file_upload(token, { ...init_opts, inbox_mode });
+    }
     slog("init_done", { publish_id: init.publish_id, chunks: init.total_chunk_count });
 
     // Step 3 — upload buffer to TikTok.
@@ -359,5 +451,5 @@ export async function upload_video_to_tiktok(opts: TikTokUploadOptions): Promise
         slog("poll_failed_non_fatal", { publish_id: init.publish_id, error: poll_err?.message });
     }
 
-    return { publish_id: init.publish_id, share_url, confirmed };
+    return { publish_id: init.publish_id, share_url, confirmed, inbox: inbox_mode, fallback_reason, privacy_level };
 }

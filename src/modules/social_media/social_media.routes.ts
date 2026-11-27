@@ -23,6 +23,7 @@ import {
     facebook_callback,
     tiktok_callback,
     telegram_connect,
+    get_tiktok_creator_info,
     get_platform_status,
     refresh_token,
     disconnect_platform,
@@ -105,6 +106,11 @@ export const socialMediaRoutes: FastifyPluginAsync = async (app) => {
         { preHandler: validate(TelegramConnectDto, "body") },
         wrap(telegram_connect),
     );
+
+    // GET /api/social/tiktok/creator_info — nickname/avatar, allowed
+    // privacy levels, interaction limits, max duration for the post UI.
+    // Static path wins over /:platform/status in Fastify's router.
+    app.get("/tiktok/creator_info", wrap(get_tiktok_creator_info));
 
     // GET /api/social/:platform/status — connected? channel name?
     // remaining seconds until token expiry?

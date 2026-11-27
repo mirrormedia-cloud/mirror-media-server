@@ -16,6 +16,26 @@ export const ManualDetailsDto = z.object({
 }).partial();
 export type ManualDetailsInput = z.infer<typeof ManualDetailsDto>;
 
+/**
+ * TikTok post settings the creator picked in the compliant post panel
+ * (TikTok Content Sharing Guidelines). When present they are sent to
+ * TikTok as-is instead of deriving privacy from `visibility`.
+ */
+export const TikTokOptionsDto = z.object({
+    privacy_level: z.enum(["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]),
+    allow_comment: z.boolean().default(false),
+    allow_duet: z.boolean().default(false),
+    allow_stitch: z.boolean().default(false),
+    /** "Your brand" — promoting the creator's own business. */
+    brand_organic_toggle: z.boolean().default(false),
+    /** "Branded content" — paid partnership with a third party. */
+    brand_content_toggle: z.boolean().default(false),
+}).refine(
+    v => !(v.brand_content_toggle && v.privacy_level === "SELF_ONLY"),
+    { path: ["privacy_level"], message: "Branded content can't be private (Only me)" },
+);
+export type TikTokOptionsInput = z.infer<typeof TikTokOptionsDto>;
+
 export const UploadDto = z.object({
     library_item_id: z.string().uuid(),
     platforms: z.array(z.enum(SUPPORTED_PLATFORMS)).min(1, "Pick at least one platform"),
@@ -43,6 +63,8 @@ export const UploadDto = z.object({
      * "schedule" flow which carries `platform_details`.
      */
     manual_details: ManualDetailsDto.optional(),
+    /** TikTok post settings from the post panel. See TikTokOptionsDto. */
+    tiktok_options: TikTokOptionsDto.optional(),
 }).refine(
     v => !!v.auto_details || (typeof v.title === "string" && v.title.trim().length > 0),
     { path: ["title"], message: "Title is required when auto_details is off" },

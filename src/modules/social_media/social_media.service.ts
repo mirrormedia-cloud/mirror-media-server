@@ -21,6 +21,7 @@ import { HttpStatus } from "../../shared/http/status";
 import type { SupportedPlatform, TelegramConnectInput } from "./social_media.dto";
 import { is_platform_allowed_for_user } from "../../shared/platform_access";
 import { verify_telegram_bot } from "../../services/social/telegram_upload.service";
+import { query_creator_info } from "../../services/social/tiktok_upload.service";
 
 // ── OAuth helpers ──────────────────────────────────────────────────────
 
@@ -286,6 +287,51 @@ export async function telegram_connect(req: FastifyRequest) {
         console.log("Error:- telegram_connect save failed", err);
         slog("telegram_save_failed", { user_id, chat_id, error: detail });
         return error(HttpStatus.INTERNAL_SERVER_ERROR, `Bot verified, but saving the account failed: ${detail}`);
+    }
+}
+
+// ── TikTok creator info (drives the compliant post UI) ─────────────────
+
+/**
+ * GET /api/social/tiktok/creator_info — TikTok's Content Sharing
+ * Guidelines require the post screen to show the creator's nickname,
+ * offer ONLY the privacy levels TikTok returns, and respect the
+ * comment/duet/stitch and max-duration limits. Fetched fresh each time
+ * the post panel opens (TikTok requires up-to-date values).
+ */
+export async function get_tiktok_creator_info(req: FastifyRequest) {
+    const user_id = (req as any).userId;
+    if (!user_id) return error(HttpStatus.UNAUTHORIZED, "Not authenticated");
+
+    const account = await SocialAccount.findOne({
+        where: { user_id, platform: "tiktok", status: "connected" } as any,
+        order: [["createdAt", "DESC"]],
+    });
+    if (!account?.access_token) {
+        return error(HttpStatus.NOT_FOUND, "No connected TikTok account. Connect TikTok first.");
+    }
+
+    // Refresh first if the access token is expired / about to expire.
+    const expires_at = (account as any).expires_at as Date | null;
+    if (expires_at && new Date(expires_at).getTime() - Date.now() < 60_000 && account.refresh_token) {
+        try {
+            await refresh_account_token(account);
+        } catch (err: any) {
+            slog("tiktok_creator_info_refresh_failed", { user_id, error: err?.message });
+            return error(HttpStatus.UNAUTHORIZED, "TikTok session expired. Reconnect your TikTok account.");
+        }
+    }
+
+    try {
+        const info = await query_creator_info(account.access_token!);
+        return success("TikTok creator info", { ...info, account_id: account.id });
+    } catch (err: any) {
+        const tt = err?.response?.data?.error;
+        slog("tiktok_creator_info_failed", { user_id, code: tt?.code, status: err?.response?.status });
+        if (err?.response?.status === 401) {
+            return error(HttpStatus.UNAUTHORIZED, "TikTok session expired. Reconnect your TikTok account.");
+        }
+        return error(HttpStatus.BAD_REQUEST, tt?.message || err?.message || "Could not load TikTok creator info");
     }
 }
 

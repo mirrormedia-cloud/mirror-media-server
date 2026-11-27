@@ -654,17 +654,29 @@ export async function create_upload(req: FastifyRequest) {
                 flog("platform upload completed", { platform, upload_id: upload.id, scheduled: ig.scheduled, platform_media_id: ig.creation_id });
             } else if (platform === "tiktok") {
                 const caption = details.caption || build_caption(details.description, details.tags, details.hashtags);
-                // Map visibility to TikTok privacy levels.
-                const privacy_level = body.visibility === "public"
-                    ? "PUBLIC_TO_EVERYONE"
-                    : body.visibility === "unlisted"
-                        ? "MUTUAL_FOLLOW_FRIENDS"
-                        : "SELF_ONLY";
+                // Prefer the creator's explicit choices from the TikTok post
+                // panel; fall back to mapping `visibility` for callers that
+                // don't send them (schedule/cron paths).
+                const tt_opts = body.tiktok_options;
+                const privacy_level = tt_opts?.privacy_level ?? (
+                    body.visibility === "public"
+                        ? "PUBLIC_TO_EVERYONE"
+                        : body.visibility === "unlisted"
+                            ? "MUTUAL_FOLLOW_FRIENDS"
+                            : "SELF_ONLY"
+                );
                 const tt: TikTokUploadResult = await upload_video_to_tiktok({
                     account,
                     file_url,
                     caption,
                     privacy_level,
+                    ...(tt_opts ? {
+                        disable_comment: !tt_opts.allow_comment,
+                        disable_duet: !tt_opts.allow_duet,
+                        disable_stitch: !tt_opts.allow_stitch,
+                        brand_organic_toggle: tt_opts.brand_organic_toggle,
+                        brand_content_toggle: tt_opts.brand_content_toggle,
+                    } : {}),
                     publish_at: body.scheduledAt ?? null,
                 });
                 await upload.update({
@@ -678,6 +690,10 @@ export async function create_upload(req: FastifyRequest) {
                             publish_id: tt.publish_id,
                             share_url: tt.share_url,
                             confirmed: tt.confirmed,
+                            inbox: tt.inbox,
+                            privacy_level: tt.privacy_level,
+                            fallback_reason: tt.fallback_reason,
+                            ...(tt.inbox ? { note: "Sent to the TikTok inbox as a draft — open TikTok to finish posting." } : {}),
                         },
                     },
                     error_message: null,
