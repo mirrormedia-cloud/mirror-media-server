@@ -971,6 +971,25 @@ export async function disconnect_platform(req: FastifyRequest) {
     let removed = 0;
     for (const r of rows) {
         try {
+            // Privacy policy promises tokens are deleted on disconnect, but
+            // destroy() is a paranoid soft-delete that keeps the row. So
+            // revoke the grant at Google (best effort) and wipe the tokens
+            // before soft-deleting.
+            if (platform === "youtube") {
+                const token = r.refresh_token ?? r.access_token;
+                if (token) {
+                    try {
+                        await axios.post(
+                            "https://oauth2.googleapis.com/revoke",
+                            new URLSearchParams({ token }).toString(),
+                            { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 10_000 },
+                        );
+                    } catch (err: any) {
+                        slog("youtube_revoke_failed", { account_id: r.id, status: err?.response?.status, error: err?.message });
+                    }
+                }
+            }
+            await r.update({ access_token: null, refresh_token: null, expires_at: null } as any);
             await r.destroy();   // paranoid soft-delete
             removed += 1;
         } catch (err: any) {
